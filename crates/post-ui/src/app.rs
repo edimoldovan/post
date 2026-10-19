@@ -1865,10 +1865,10 @@ mod tests {
             lines.iter().find(|(c, _)| c.label == label).and_then(|(c, _)| c.key.clone())
         };
         assert_eq!(key("New email").as_deref(), Some("Ctrl+N"));
-        assert_eq!(key("Settings").as_deref(), Some("Home"));
+        assert_eq!(key("Settings").as_deref(), Some("Ctrl+,"), "a comma, not Comma");
         assert_eq!(key("Add account"), None, "on no key");
         assert_eq!(app.key_of(&ctx, Command::Palette), "Ctrl+K", "a letter over Ctrl+/ and F1");
-        assert_eq!(key("Search this account").as_deref(), Some("/"), "a slash, not Slash");
+        assert_eq!(key("Search this account").as_deref(), Some("Ctrl+F"), "a letter over /");
         assert_eq!(key("Back").as_deref(), Some("Backspace"));
         let mut app = writing();
         assert_eq!(app.key_of(&ctx, Command::Back), "Escape");

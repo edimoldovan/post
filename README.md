@@ -16,7 +16,7 @@ Later, Post will support more email providers.
   Trash, then your own labels by name, nested ones under their parent. Each
   folder shows how many of its conversations are unread; Drafts shows how many
   drafts there are. The counts are kept up to date in the background.
-- **Search** with `/`: a Gmail search in the account you are in. Results are a
+- **Search** with `/` or `Ctrl+F`: a Gmail search in the account you are in. Results are a
   list of their own, and Back from a message returns to them.
 - **All / Unread** narrows any folder or search to what is unread.
 - **Rows** show an unread dot, the sender, the time, the subject and the start
@@ -126,10 +126,10 @@ flowchart LR
 |---|---|
 | `R` · `F` | Reply · Forward |
 | `Delete` · `Ctrl+U` | Move to the trash · Mark unread |
-| `/` | Search this account |
+| `/` · `Ctrl+F` | Search this account |
 | `Ctrl+N` · `Ctrl+Enter` | New email · Send |
 | `Esc` · `Backspace` | Back |
-| `Home` | Settings |
+| `Ctrl+,` · `Home` | Settings |
 | `Ctrl+R` | Refresh what is on screen |
 | `Ctrl+C` | Copy the selection |
 | `Ctrl+K` · `Ctrl+/` · `F1` | Every action and its key: the palette |

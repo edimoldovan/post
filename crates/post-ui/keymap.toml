@@ -21,6 +21,8 @@
 "PageUp" = "page_previous"
 "End" = "last"
 "Home" = "accounts"
+# Settings, on the same key as in Grido.
+"Ctrl+Comma" = "accounts"
 "Enter" = "open"
 # Left and Right move between the columns — sidebar, list, reader — and Up and
 # Down walk the one the keyboard is in.
@@ -37,6 +39,8 @@
 # Search this account: "/", as Gmail has it — Shift+/ where "/" is shifted.
 "/" = "search"
 "Shift+/" = "search"
+# And on the key Grido finds with.
+"Ctrl+F" = "search"
 
 # --- Doing something: Ctrl+<letter> ---
 "Ctrl+R" = "refresh"

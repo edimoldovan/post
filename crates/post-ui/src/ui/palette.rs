@@ -200,11 +200,13 @@ impl PostApp {
     }
 }
 
-/// A chord as egui spells it, but with "/" for the slash it calls Slash.
+/// A chord as egui spells it, but with "/" and "," for the slash and the
+/// comma it calls Slash and Comma.
 fn spell(ctx: &Context, shortcut: &KeyboardShortcut) -> String {
     let text = ctx.format_shortcut(shortcut);
     match shortcut.logical_key {
         Key::Slash => text.replace("Slash", "/"),
+        Key::Comma => text.replace("Comma", ","),
         _ => text,
     }
 }
