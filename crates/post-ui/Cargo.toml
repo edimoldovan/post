@@ -8,7 +8,7 @@ description = "Post's window: accounts, inbox and message detail, over the headl
 
 [dependencies]
 eframe = "0.33.3"
-omarchy-kit = { git = "https://github.com/edimoldovan/omarchy-kit.git", rev = "8857ca1d1fc72f56f06ea10d4b7afe14c6991c86" }
+omarchy-kit = { git = "https://github.com/edimoldovan/omarchy-kit.git", rev = "b2379200a60c1d3fb2ce429a70ce8cd1f365bc0e" }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.4"
 post = { path = "../post" }

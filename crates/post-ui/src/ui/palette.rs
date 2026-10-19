@@ -77,10 +77,10 @@ impl PostApp {
             .filter(|&cmd| self.applies(cmd, mail_list, unread))
             .map(|cmd| {
                 let key = Some(self.key_of(ctx, cmd)).filter(|key| !key.is_empty());
-                (Choice { label: cmd.label().to_string(), key }, Action::Run(cmd))
+                (Choice { label: cmd.label().to_string(), key, keywords: String::new() }, Action::Run(cmd))
             })
             .collect();
-        let line = |label: String, action: Action| (Choice { label, key: None }, action);
+        let line = |label: String, action: Action| (Choice { label, key: None, keywords: String::new() }, action);
         let accounts = self.accounts.clone().unwrap_or_default();
         let current = self.account().map(str::to_owned);
 
