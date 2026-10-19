@@ -41,8 +41,7 @@ impl PostApp {
             ui.horizontal(|ui| {
                 if back
                     && ui
-                        .add(Button::icon_only(icons::glyph("back")).quiet())
-                        .on_hover_text("Back")
+                        .add(Button::icon_only(icons::glyph("back")).quiet().tip("Back"))
                         .clicked()
                 {
                     out.push(Command::Back);

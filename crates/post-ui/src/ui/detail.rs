@@ -227,25 +227,23 @@ struct Hints {
 fn toolbar(ui: &mut Ui, back: bool, labels: bool, hints: &Hints, out: &mut Vec<Command>) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        if back && ui.add(tool("back", "Back", "", false)).on_hover_text(tip("Back", &hints.back)).clicked() {
+        if back && ui.add(tool("back", "Back", &hints.back, false)).clicked() {
             out.push(Command::Back);
         }
         if ui
             .add(tool("reply", "Reply", &hints.reply, labels))
-            .on_hover_text(tip("Reply", &hints.reply))
             .clicked()
         {
             out.push(Command::Reply);
         }
         if ui
             .add(tool("forward", "Forward", &hints.forward, labels))
-            .on_hover_text(tip("Forward", &hints.forward))
             .clicked()
         {
             out.push(Command::Forward);
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let more = ui.add(tool("more", "More", "", false)).on_hover_text("More");
+            let more = ui.add(tool("more", "More", "", false));
             Popup::menu(&more).show(|ui| {
                 if ui
                     .add(Button::new("Mark unread").quiet().hint(&hints.unread))
@@ -257,7 +255,6 @@ fn toolbar(ui: &mut Ui, back: bool, labels: bool, hints: &Hints, out: &mut Vec<C
             });
             if ui
                 .add(tool("trash", "Delete", &hints.delete, labels))
-                .on_hover_text(tip("Delete", &hints.delete))
                 .clicked()
             {
                 out.push(Command::Delete);
@@ -271,8 +268,8 @@ fn toolbar(ui: &mut Ui, back: bool, labels: bool, hints: &Hints, out: &mut Vec<C
 /// One tool on the bar: its icon, and its word and key where there is room.
 fn tool(icon: &'static str, label: &str, hint: &str, labels: bool) -> Button<'static> {
     match labels {
-        true => Button::new(label).icon(icons::glyph(icon)).hint(hint).quiet(),
-        false => Button::icon_only(icons::glyph(icon)).quiet(),
+        true => Button::new(label).icon(icons::glyph(icon)).hint(hint).quiet().tip(tip(label, hint)),
+        false => Button::icon_only(icons::glyph(icon)).quiet().tip(label).hint(hint),
     }
 }
 

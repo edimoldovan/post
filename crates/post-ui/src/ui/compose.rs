@@ -89,8 +89,7 @@ impl PostApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui
-                    .add(Button::icon_only(icons::glyph("back")).quiet())
-                    .on_hover_text("Back (Esc) — what is typed stays in Drafts")
+                    .add(Button::icon_only(icons::glyph("back")).quiet().tip("Back (Esc) — what is typed stays in Drafts"))
                     .clicked()
                 {
                     out.push(Command::Back);
@@ -430,8 +429,7 @@ fn attachment_cards(ui: &mut Ui, attach: &mut Vec<String>) {
                     }
                     ui.label(RichText::new(size).weak().size(12.0));
                     if ui
-                        .add(Button::icon_only(icons::glyph("close")).quiet().small())
-                        .on_hover_text("Take it off")
+                        .add(Button::icon_only(icons::glyph("close")).quiet().small().tip("Take it off"))
                         .clicked()
                     {
                         dropped = Some(i);

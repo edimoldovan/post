@@ -94,9 +94,9 @@ impl PostApp {
         let names: Vec<String> = accounts.iter().map(|a| self.name_of(a)).collect();
         let mut picked: Option<Route> = None;
         // What the tools at the edges do, and the keys they are also on.
-        let new_tip = tip("A new email", &self.key_of(ctx, Command::New));
-        let gear_tip = tip("Settings", &self.key_of(ctx, Command::Accounts));
-        let keys_tip = tip("Actions and keys", &self.key_of(ctx, Command::Palette));
+        let new_key = self.key_of(ctx, Command::New);
+        let gear_key = self.key_of(ctx, Command::Accounts);
+        let keys_key = self.key_of(ctx, Command::Palette);
         let palette_open = self.command_palette.is_open();
 
         SidePanel::left("post-sidebar")
@@ -106,7 +106,7 @@ impl PostApp {
                 ui.add_space(14.0);
                 mark(ui, rail);
                 ui.add_space(14.0);
-                if compose_button(ui, rail, &new_tip) {
+                if compose_button(ui, rail, &new_key) {
                     out.push(Command::New);
                 }
                 ui.add_space(14.0);
@@ -149,14 +149,14 @@ impl PostApp {
                     ui.add_space(12.0);
                     let (settings, palette) = if rail {
                         ui.vertical_centered(|ui| {
-                            let palette = keys(ui, palette_open, &keys_tip);
-                            (gear(ui, on_settings, &gear_tip), palette)
+                            let palette = keys(ui, palette_open, &keys_key);
+                            (gear(ui, on_settings, &gear_key), palette)
                         })
                         .inner
                     } else {
                         ui.horizontal(|ui| {
-                            let settings = gear(ui, on_settings, &gear_tip);
-                            (settings, keys(ui, palette_open, &keys_tip))
+                            let settings = gear(ui, on_settings, &gear_key);
+                            (settings, keys(ui, palette_open, &keys_key))
                         })
                         .inner
                     };
@@ -342,20 +342,18 @@ fn logo(painter: &Painter, rect: Rect) {
 
 /// Compose: the one primary button, as wide as the sidebar — on the rail,
 /// its icon alone.
-fn compose_button(ui: &mut Ui, rail: bool, tip: &str) -> bool {
+fn compose_button(ui: &mut Ui, rail: bool, key: &str) -> bool {
     let button = if rail {
-        Button::icon_only(icons::glyph("compose")).primary().large()
+        Button::icon_only(icons::glyph("compose")).primary().large().tip("A new email").hint(key)
     } else {
         Button::new("Compose")
             .icon(icons::glyph("compose"))
             .primary()
             .large()
             .width(ui.available_width())
+            .tip(tip("A new email", key))
     };
-    ui.vertical_centered(|ui| ui.add(button))
-        .inner
-        .on_hover_text(tip)
-        .clicked()
+    ui.vertical_centered(|ui| ui.add(button)).inner.clicked()
 }
 
 /// One account: its initial in its colour and, on the sidebar, its name. The
@@ -426,16 +424,16 @@ fn account_entry(
 }
 
 /// The settings gear, a quiet button: marked while settings is on screen.
-fn gear(ui: &mut Ui, here: bool, tip: &str) -> bool {
-    let button = Button::icon_only(icons::glyph("gear")).quiet().selected(here);
-    ui.add(button).on_hover_text(tip).clicked()
+fn gear(ui: &mut Ui, here: bool, key: &str) -> bool {
+    let button = Button::icon_only(icons::glyph("gear")).quiet().selected(here).tip("Settings").hint(key);
+    ui.add(button).clicked()
 }
 
 /// The palette's button: every action and the key it is on, marked while
 /// the palette is open.
-fn keys(ui: &mut Ui, open: bool, tip: &str) -> bool {
-    let button = Button::icon_only(icons::glyph("keyboard")).quiet().selected(open);
-    ui.add(button).on_hover_text(tip).clicked()
+fn keys(ui: &mut Ui, open: bool, key: &str) -> bool {
+    let button = Button::icon_only(icons::glyph("keyboard")).quiet().selected(open).tip("Actions and keys").hint(key);
+    ui.add(button).clicked()
 }
 
 #[cfg(test)]
