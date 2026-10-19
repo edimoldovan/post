@@ -2,9 +2,11 @@
 
 <img src="packaging/post.svg" alt="Post" width="56" align="right">
 
-Post is Gmail as a native window on Linux, a command in the terminal, and a set
+Post is (for now) Gmail as a native window on Linux, a command in the terminal, and a set
 of tools for Claude. Each connected account is its own Post — nothing merges
 several accounts' mail into one list.
+
+Later, Post will support more email providers.
 
 ### Accounts, folders, search
 
