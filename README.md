@@ -8,6 +8,15 @@ several accounts' mail into one list.
 
 Later, Post will support more email providers.
 
+Post, Grido and omarchy-kit are made together:
+
+- [**Post**](https://github.com/edimoldovan/post) — Gmail as a native window
+  on Linux, a command in the terminal, and tools for Claude.
+- [**Grido**](https://github.com/edimoldovan/grido) — a fast native
+  spreadsheet for `.xlsx` files, and tools for Claude.
+- [**omarchy-kit**](https://github.com/edimoldovan/omarchy-kit) — the egui
+  elements both apps are built from, in the Omarchy theme's colours.
+
 ### Accounts, folders, search
 
 - **The sidebar** lists your accounts — each with an initial in its own colour,
