@@ -6,7 +6,7 @@
 //! the list column. Compose and reply take both columns. Under 760 the screen
 //! on top is the only column.
 
-use eframe::egui::{CentralPanel, Context, RichText, SidePanel, TopBottomPanel, Ui};
+use eframe::egui::{CentralPanel, Context, RichText, SidePanel, Ui};
 
 use crate::commands::Command;
 use crate::route::Route;
@@ -91,30 +91,21 @@ impl PostApp {
             Route::Account { .. } => format!("{name} — settings"),
         };
         let status = self.status.clone();
-        TopBottomPanel::bottom("post-status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(where_).weak());
-                if !status.is_empty() {
-                    ui.separator();
-                    ui.label(status);
-                }
-                // A dead Google grant is repaired from right here: the same
-                // consent flow that connected the account replaces its
-                // tokens — no terminal.
-                if self.reconnect {
-                    ui.separator();
-                    if ui
-                        .add_enabled(
-                            !self.connecting,
-                            omarchy_kit::Button::new("Reconnect").danger().small(),
-                        )
-                        .clicked()
-                    {
-                        self.start(crate::client::Job::AddAccount);
-                    }
-                }
+        let connecting = self.connecting;
+        let mut reconnect = false;
+        let mut line = omarchy_kit::StatusLine::new("post-status").place(where_).message(status);
+        // A dead Google grant is repaired from right here: the same consent
+        // flow that connected the account replaces its tokens — no terminal.
+        if self.reconnect {
+            line = line.after(|ui| {
+                let button = omarchy_kit::Button::new("Reconnect").danger().small();
+                reconnect = ui.add_enabled(!connecting, button).clicked();
             });
-        });
+        }
+        line.show(ctx);
+        if reconnect {
+            self.start(crate::client::Job::AddAccount);
+        }
     }
 
     /// A sentence for a view with nothing in it yet — never a blank rectangle.

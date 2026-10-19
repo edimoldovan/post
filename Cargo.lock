@@ -2840,7 +2840,7 @@ dependencies = [
 [[package]]
 name = "omarchy-kit"
 version = "0.1.0"
-source = "git+https://github.com/edimoldovan/omarchy-kit.git?rev=4d1b3f9f2cc9da505516727178e3d17a22e20e0e#4d1b3f9f2cc9da505516727178e3d17a22e20e0e"
+source = "git+https://github.com/edimoldovan/omarchy-kit.git?rev=57c1c54ffff8c1c721ee094a91fb9e16a70ed2ec#57c1c54ffff8c1c721ee094a91fb9e16a70ed2ec"
 dependencies = [
  "egui",
  "toml",
