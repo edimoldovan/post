@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Post
+GenericName=Mail
+Comment=Your mail
+Exec=post %u
+Icon=post
+Terminal=false
+Categories=Network;Email;
+MimeType=x-scheme-handler/mailto;
+Keywords=mail;email;post;inbox;
+StartupNotify=true
+StartupWMClass=post

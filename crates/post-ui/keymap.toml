@@ -1,0 +1,58 @@
+# Post key bindings.
+#
+# Format:  "Chord" = "command_id"
+# Chords are Modifier+Key, e.g. "Ctrl+R". Modifiers: Ctrl, Shift, Alt.
+# Key names: A-Z, 0-9, ArrowUp/ArrowDown/ArrowLeft/ArrowRight, Home, End,
+# PageUp, PageDown, Delete, Backspace, Enter, Tab, Escape, Space, "/"...
+#
+# One scheme: bare keys move around the views, Ctrl+<letter> does something.
+# No function keys (F1 stays only as the old hand's alias for the palette).
+#
+# Post looks for this file in: $POST_KEYMAP, ./keymap.toml,
+# ~/.config/post/keymap.toml — first hit wins. Edit and restart.
+# The full command list is in src/commands.rs (Command::from_id);
+# press Ctrl+K for every action and the key it is on.
+
+[bindings]
+# --- Moving around: bare keys ---
+"ArrowDown" = "next"
+"ArrowUp" = "previous"
+"PageDown" = "page_next"
+"PageUp" = "page_previous"
+"End" = "last"
+"Home" = "accounts"
+"Enter" = "open"
+# Left and Right move between the columns — sidebar, list, reader — and Up and
+# Down walk the one the keyboard is in.
+"ArrowRight" = "right"
+"ArrowLeft" = "left"
+"Backspace" = "back"
+"Escape" = "back"
+"Delete" = "delete"
+# Reply: the one bare letter, because it is the one thing you do to a message
+# you are reading, and it is the letter every mail client uses for it.
+"R" = "reply"
+# Forward: the letter every mail client uses for it.
+"F" = "forward"
+# Search this account: "/", as Gmail has it — Shift+/ where "/" is shifted.
+"/" = "search"
+"Shift+/" = "search"
+
+# --- Doing something: Ctrl+<letter> ---
+"Ctrl+R" = "refresh"
+"Ctrl+C" = "copy"
+"Ctrl+U" = "mark_unread"
+"Ctrl+N" = "new"
+"Ctrl+W" = "quit"
+# Sending the reply you have written. Ctrl, because the body editor has the
+# keyboard while you write and a bare key there is a letter.
+"Ctrl+Enter" = "send"
+
+# --- Every action, found by typing ---
+# Opens even while a text field has the keyboard.
+"Ctrl+K" = "palette"
+"Ctrl+/" = "palette"
+# On layouts where "/" is a shifted key (Swedish: Shift+7), the same press
+# arrives with Shift on it.
+"Ctrl+Shift+/" = "palette"
+"F1" = "palette"

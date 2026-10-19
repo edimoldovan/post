@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "crates/post",
+    "crates/post-ui",
+    "crates/post-app",
+]
+exclude = ["vendor"]
+resolver = "2"
+
+# Blitz's painter with a settable selection colour; see vendor/README.md.
+[patch.crates-io]
+blitz-paint = { path = "vendor/blitz-paint" }

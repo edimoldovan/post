@@ -1,0 +1,14 @@
+[package]
+name = "post"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+authors = ["Eduard Moldovan"]
+description = "Post: the mail library — Gmail over OAuth, with the accounts and OAuth tokens on disk"
+
+[dependencies]
+base64 = "0.22.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sha2 = "0.10.9"
+ureq = "2.12.1"

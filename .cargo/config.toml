@@ -1,0 +1,4 @@
+# omarchy-kit comes from GitHub over ssh (the gitconfig rewrites https to it);
+# cargo's own ssh client has no agent, the git CLI does.
+[net]
+git-fetch-with-cli = true
