@@ -17,6 +17,34 @@ Post, Grido and omarchy-kit are made together:
 - [**omarchy-kit**](https://github.com/edimoldovan/omarchy-kit) — the egui
   elements both apps are built from, in the Omarchy theme's colours.
 
+<img src="docs/reading.png" width="880" alt="Post with three accounts, the inbox and a conversation open">
+
+Three accounts, the inbox, and a conversation open — its HTML drawn as it was sent.
+
+<img src="docs/search.png" width="880" alt="Search results for invoice, one of them open">
+
+Search, in the account you are in: `/` or `Ctrl+F`.
+
+<img src="docs/palette.png" width="880" alt="The command palette, filtered by re">
+
+Every action, found by typing: `Ctrl+K`.
+
+<img src="docs/compose.png" width="880" alt="A new email to two addresses">
+
+A new email, its addresses as tags.
+
+<img src="docs/settings.png" width="880" alt="Settings: the accounts, one of them open, and Claude">
+
+Settings: the accounts, one of them, and whether Claude may use Post.
+
+<img src="docs/first-start.png" width="880" alt="The question Post asks on first start">
+
+On its first start Post asks before Claude may use it.
+
+<img src="docs/medium.png" width="420" alt="Post in a medium window"> <img src="docs/narrow.png" width="202" alt="Post in a narrow window: the inbox"> <img src="docs/narrow-reading.png" width="202" alt="Post in a narrow window: a conversation">
+
+Smaller windows: the columns narrow, then the sidebar becomes a rail.
+
 ### Accounts, folders, search
 
 - **The sidebar** lists your accounts — each with an initial in its own colour,
