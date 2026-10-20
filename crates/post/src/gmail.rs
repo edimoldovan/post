@@ -1077,9 +1077,19 @@ fn cache_drop(email: &str, id: &str) {
 /// message is immutable, so this needs no expiry and no refresh behind it.
 fn cached_message(email: &str, id: &str) -> Option<Value> {
     let text = std::fs::read_to_string(paths::read_cache_file(email, id)).ok()?;
-    let message: Value = serde_json::from_str(&text).ok()?;
+    let mut message: Value = serde_json::from_str(&text).ok()?;
     // A file with no message in it is not a message.
     message.get("id").and_then(Value::as_str)?;
+    // Its HTML is where bodies are kept now: a path saved before the state
+    // dir moved names a file that is not there any more. A body that is gone
+    // altogether is fetched again, rather than the message shown without it.
+    if message.get("html_path").is_some_and(|path| !path.is_null()) {
+        let file = paths::body_file(email, id);
+        if !file.exists() {
+            return None;
+        }
+        message["html_path"] = json!(file.display().to_string());
+    }
     Some(message)
 }
 
@@ -1589,6 +1599,31 @@ mod tests {
             });
             save_message(email, "18f3", &marked);
             assert_eq!(cached_message(email, "18f3"), Some(marked));
+        });
+    }
+
+    /// A message kept before its body moved points at the body where it is
+    /// now; one whose body is gone is fetched again.
+    #[test]
+    fn a_kept_message_finds_its_body_where_it_is_now() {
+        paths::with_state_dir(|_| {
+            let email = "moved@acme.com";
+            let kept = json!({
+                "id": "18f3", "text": "hi", "unread": false, "marked_read": true,
+                "html_path": "/home/ed/.local/share/elsewhere/postbodies/moved@acme.com/18f3.html",
+            });
+            save_message(email, "18f3", &kept);
+            assert_eq!(cached_message(email, "18f3"), None, "no body anywhere: fetched again");
+
+            let body = paths::body_file(email, "18f3");
+            put(body.clone(), "<p>hi</p>");
+            let found = cached_message(email, "18f3").expect("kept");
+            assert_eq!(found["html_path"], json!(body.display().to_string()));
+
+            // A message without HTML has no body to find.
+            let plain = json!({"id": "18f4", "text": "hi", "marked_read": true, "html_path": null});
+            save_message(email, "18f4", &plain);
+            assert_eq!(cached_message(email, "18f4"), Some(plain));
         });
     }
 
