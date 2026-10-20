@@ -331,6 +331,5 @@ mod tests {
     fn the_skill_is_posts_own() {
         assert!(SKILL.starts_with("---\nname: post\n"));
         assert!(SKILL.contains("post_send") && SKILL.contains("download folder"));
-        assert!(!SKILL.to_lowercase().contains("armor"));
     }
 }

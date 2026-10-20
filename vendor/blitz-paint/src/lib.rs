@@ -26,7 +26,7 @@ const FONT_EMBOLDEN_ENABLED: bool = cfg!(any(
 ));
 
 /// The colour text selection is highlighted in: Blitz's own light blue unless
-/// the embedding app sets another. (Patched in Armor: upstream hard-codes it.)
+/// the embedding app sets another. (Patched in Post: upstream hard-codes it.)
 static SELECTION_RGBA: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::from_be_bytes([180, 213, 255, 255]));
 

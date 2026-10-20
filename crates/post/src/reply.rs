@@ -327,7 +327,7 @@ pub fn raw_message(draft: &Draft) -> Result<String, String> {
     }
     // With files aboard the reply is multipart/mixed: the text first, then
     // each file base64'd under its own name.
-    let boundary = "armor-post-part";
+    let boundary = "post-part";
     head.push(format!(
         "Content-Type: multipart/mixed; boundary=\"{boundary}\""
     ));

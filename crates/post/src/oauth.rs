@@ -66,7 +66,7 @@ pub fn add_account() -> Result<String, String> {
     let tokens = exchange(&client, &code, &verifier, &redirect)?;
     if tokens.refresh_token.is_empty() {
         return Err("Google sent no refresh token, so the account would not stay \
-                    connected — remove Armor's access at \
+                    connected — remove Post's access at \
                     https://myaccount.google.com/permissions and try again"
             .to_string());
     }

@@ -35,7 +35,7 @@ const BATCH: usize = 50;
 
 /// The separator between the inner calls we send. Ours to choose, and it may
 /// not appear in anything it separates — nothing here contains it.
-const BOUNDARY: &str = "armor-post-batch";
+const BOUNDARY: &str = "post-batch";
 
 /// One page of a mailbox. Small on purpose: a page is a thing a model reads,
 /// not a mailbox dump.
@@ -52,7 +52,7 @@ pub fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
         .timeout_read(Duration::from_secs(60))
-        .user_agent(concat!("armor-post/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("post/", env!("CARGO_PKG_VERSION")))
         .build()
 }
 
