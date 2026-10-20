@@ -403,8 +403,10 @@ impl NavigationProvider for Browser {
     }
 }
 
-/// The page a message's HTML is rendered in: the theme's colours, 14px text on
-/// 1.5 lines, 14px of padding, pictures and tables no wider than the column.
+/// The page a message's HTML is rendered in: the theme's colours, 14px text at
+/// the line height a browser gives it, 14px of padding, pictures and tables no
+/// wider than the column. What a message sets for itself — its own line
+/// heights among it — it keeps.
 pub fn page(html: &str, bg: [u8; 3], fg: [u8; 3], link: [u8; 3]) -> String {
     let body = if html.len() > MAX_HTML {
         &html[..floor_char_boundary(html, MAX_HTML)]
@@ -416,7 +418,7 @@ pub fn page(html: &str, bg: [u8; 3], fg: [u8; 3], link: [u8; 3]) -> String {
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
          <style>html,body{{margin:0;padding:0;background:{bg};color:{fg};\
-         font:14px/1.5 system-ui,sans-serif;overflow-wrap:break-word}}\
+         font:14px system-ui,sans-serif;overflow-wrap:break-word}}\
          body{{padding:14px}}\
          a{{color:{link}}} img{{max-width:100%;height:auto}} \
          table{{max-width:100%}} \
@@ -604,7 +606,21 @@ mod tests {
         heights_are_minimums(&mut doc);
         doc.as_mut().resolve(0.0);
         let height = doc.as_ref().root_element().final_layout().size.height;
-        assert!(height >= 4.0 * 21.0, "four lines take room: {height}");
+        assert!(height >= 4.0 * 14.0, "four lines take room: {height}");
+    }
+
+    /// Text that sets no line height of its own — mail often says `inherit` —
+    /// gets a browser's, not one and a half lines.
+    #[test]
+    fn lines_are_spaced_as_a_browser_spaces_them() {
+        let message = "<p style=\"margin:0;font-size:14px;line-height:inherit\">One<br>Two</p>";
+        let mut doc = HtmlDocument::from_html(
+            &page(message, BG, FG, LINK),
+            DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
+        );
+        doc.as_mut().resolve(0.0);
+        let body = doc.as_ref().root_element().final_layout().size.height - 2.0 * 14.0;
+        assert!(body < 2.0 * 1.45 * 14.0, "two lines, closer than 1.5 apart: {body}");
     }
 
     /// Only pictures are delivered: a stylesheet or a font is not one.
