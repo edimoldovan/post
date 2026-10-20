@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
-use blitz_dom::{DocumentConfig, EventDriver, NoopEventHandler, Point, local_name};
+use blitz_dom::{DocumentConfig, EventDriver, Node, NodeId, NoopEventHandler, Point, QualName, local_name, ns};
 use blitz_html::HtmlDocument;
 use blitz_paint::paint_scene;
 use blitz_traits::events::{
@@ -117,6 +117,7 @@ impl Open {
                 ..Default::default()
             },
         );
+        heights_are_minimums(&mut doc);
         doc.as_mut().resolve(0.0);
         Open {
             key: key.to_string(),
@@ -426,6 +427,68 @@ pub fn page(html: &str, bg: [u8; 3], fg: [u8; 3], link: [u8; 3]) -> String {
     )
 }
 
+/// A table's, a row's or a cell's `height` is a minimum: it grows to fit
+/// what is in it (CSS 2.2 §17.5.3). Blitz takes it as a fixed size, and mail
+/// leans on the difference — `height:0` on a cell, `height:100%` on the table
+/// in it — which hides the message. So each one's height is restated as the
+/// `min-height` Blitz does honour, before the document is styled.
+fn heights_are_minimums(doc: &mut HtmlDocument) {
+    let tables = [local_name!("table"), local_name!("tr"), local_name!("td"), local_name!("th")];
+    let mut changes: Vec<(NodeId, String, bool)> = Vec::new();
+    let mut stack: Vec<&Node> = vec![doc.as_ref().root_node()];
+    while let Some(node) = stack.pop() {
+        if node.element_data().is_some_and(|el| tables.contains(&el.name.local)) {
+            let attribute = node.attr(local_name!("height"));
+            if let Some(style) = restated(node.attr(local_name!("style")).unwrap_or(""), attribute) {
+                changes.push((node.id, style, attribute.is_some()));
+            }
+        }
+        stack.extend(node.children.iter().map(|&child| node.with(child)));
+    }
+    let mut mutator = doc.as_mut().mutate();
+    let name = |local| QualName::new(None, ns!(), local);
+    for (id, style, had_attribute) in changes {
+        mutator.set_attribute(id, name(local_name!("style")), &style);
+        if had_attribute {
+            mutator.clear_attribute(id, name(local_name!("height")));
+        }
+    }
+}
+
+/// `style` with its `height` made `min-height` — or, when it sets no height,
+/// with the `height` attribute added as one, the attribute being the weaker
+/// of the two. `None` when there is no height to restate.
+fn restated(style: &str, attribute: Option<&str>) -> Option<String> {
+    let mut found = false;
+    let declarations: Vec<String> = style
+        .split(';')
+        .map(|declaration| match declaration.split_once(':') {
+            Some((name, value)) if name.trim().eq_ignore_ascii_case("height") => {
+                found = true;
+                format!("min-height:{value}")
+            }
+            _ => declaration.to_string(),
+        })
+        .collect();
+    let mut out = declarations.join(";");
+    if found {
+        return Some(out);
+    }
+    let height = attribute?.trim();
+    let height = if !height.is_empty() && height.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        format!("{height}px")
+    } else if height.ends_with('%') || height.ends_with("px") {
+        height.to_string()
+    } else {
+        return None;
+    };
+    if !out.trim().is_empty() && !out.trim_end().ends_with(';') {
+        out.push(';');
+    }
+    out.push_str(&format!("min-height:{height}"));
+    Some(out)
+}
+
 /// The message either side of the `<!doctype>` it came with, so the page
 /// around it declares the only one.
 ///
@@ -511,6 +574,37 @@ mod tests {
         assert!(page.len() < huge.len() + 2048);
         assert!(page.starts_with("<!doctype html>"));
         assert!(page.ends_with("</body></html>"));
+    }
+
+    /// A table's or a cell's height becomes a minimum; nothing else that
+    /// says height is touched.
+    #[test]
+    fn heights_on_tables_and_cells_become_minimums() {
+        assert_eq!(restated("width:580px;height:0", None).as_deref(), Some("width:580px;min-height:0"));
+        assert_eq!(restated("HEIGHT: 100% ;", None).as_deref(), Some("min-height: 100% ;"));
+        assert_eq!(restated("line-height:1;max-height:5px;min-height:2px", None), None);
+        assert_eq!(restated("", Some("20")).as_deref(), Some("min-height:20px"));
+        assert_eq!(restated("color:red", Some("50%")).as_deref(), Some("color:red;min-height:50%"));
+        assert_eq!(restated("height:0", Some("20")).as_deref(), Some("min-height:0"), "the style outranks the attribute");
+        assert_eq!(restated("", Some("auto")), None);
+    }
+
+    /// Mail as it is often built: a table restyled `display:block`, a cell
+    /// in it of `height:0`, and in that a table of `height:100%`. Every line
+    /// of what it holds still takes room.
+    #[test]
+    fn a_zero_height_cell_still_shows_what_it_holds() {
+        let message = "<table style=\"display:block;width:100%\"><tbody><tr>\
+            <th style=\"width:580px;height:0\"><table width=\"100%\" style=\"height:100%\"><tbody><tr>\
+            <th><p>One</p><p>Two</p><p>Three</p><p>Four</p></th></tr></tbody></table></th></tr></tbody></table>";
+        let mut doc = HtmlDocument::from_html(
+            &page(message, BG, FG, LINK),
+            DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
+        );
+        heights_are_minimums(&mut doc);
+        doc.as_mut().resolve(0.0);
+        let height = doc.as_ref().root_element().final_layout().size.height;
+        assert!(height >= 4.0 * 21.0, "four lines take room: {height}");
     }
 
     /// Only pictures are delivered: a stylesheet or a font is not one.
