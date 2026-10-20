@@ -966,7 +966,7 @@ fn body_page(message: &Message, palette: &Palette) -> Option<Page> {
     let html = std::fs::read_to_string(path).ok()?;
     let rgb = |c: eframe::egui::Color32| [c.r(), c.g(), c.b()];
     Some(Page {
-        html: crate::html::page(&html, rgb(palette.bg), rgb(palette.fg), rgb(palette.accent)),
+        html: crate::html::page(&html, rgb(palette.accent)),
     })
 }
 

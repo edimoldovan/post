@@ -30,6 +30,9 @@ use eframe::egui::{
     TextureOptions, Ui, Vec2, pos2,
 };
 
+/// The page mail is drawn on, as [`page`] sets it.
+const PAPER: Color32 = Color32::WHITE;
+
 /// How tall one painted tile is, in points.
 const TILE: f32 = 512.0;
 /// The most of a message that is rendered. Anything past this is not reading.
@@ -47,10 +50,10 @@ impl Html {
     /// Draws `page` — the message `key` — at the width the ui has and as tall
     /// as it is, and answers the pointer over it: a link opens in the browser,
     /// a drag selects text.
-    pub fn show(&mut self, ui: &mut Ui, key: &str, page: &str, background: Color32, accent: Color32) {
-        // Blitz's own selection blue is unreadable under light text: the
-        // theme's accent, sunk into the background, reads on dark and light.
-        blitz_paint::set_selection_color(selection(accent, background));
+    pub fn show(&mut self, ui: &mut Ui, key: &str, page: &str, accent: Color32) {
+        // The theme's accent, sunk into the page's white: a selection that
+        // the text over it reads on.
+        blitz_paint::set_selection_color(selection(accent, PAPER));
         let ctx = ui.ctx().clone();
         let width = ui.available_width().floor().max(1.0);
         let ppp = ctx.pixels_per_point();
@@ -71,7 +74,7 @@ impl Html {
         {
             ui.ctx().copy_text(text);
         }
-        open.paint(ui, rect, background);
+        open.paint(ui, rect, PAPER);
     }
 
     /// The text selected in the body, for Copy.
@@ -403,11 +406,13 @@ impl NavigationProvider for Browser {
     }
 }
 
-/// The page a message's HTML is rendered in: the theme's colours, 14px text at
-/// the line height a browser gives it, 14px of padding, pictures and tables no
-/// wider than the column. What a message sets for itself — its own line
-/// heights among it — it keeps.
-pub fn page(html: &str, bg: [u8; 3], fg: [u8; 3], link: [u8; 3]) -> String {
+/// The page a message's HTML is rendered in: black on white with a browser's
+/// blue links, as a mail app shows mail — mail is written for that page, and
+/// text a message leaves uncoloured on a card of its own stays readable. 14px
+/// text at a browser's line height, 14px of padding, pictures and tables no
+/// wider than the column. What a message sets for itself it keeps. Only the
+/// selection takes the theme's accent.
+pub fn page(html: &str, accent: [u8; 3]) -> String {
     let body = if html.len() > MAX_HTML {
         &html[..floor_char_boundary(html, MAX_HTML)]
     } else {
@@ -417,15 +422,13 @@ pub fn page(html: &str, bg: [u8; 3], fg: [u8; 3], link: [u8; 3]) -> String {
     let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
-         <style>html,body{{margin:0;padding:0;background:{bg};color:{fg};\
+         <style>html,body{{margin:0;padding:0;background:#fff;color:#000;\
          font:14px system-ui,sans-serif;overflow-wrap:break-word}}\
          body{{padding:14px}}\
-         a{{color:{link}}} img{{max-width:100%;height:auto}} \
+         img{{max-width:100%;height:auto}} \
          table{{max-width:100%}} \
-         ::selection{{background:{link};color:#fff}}</style></head><body>{before}{after}</body></html>",
-        bg = hex(bg),
-        fg = hex(fg),
-        link = hex(link),
+         ::selection{{background:{accent};color:#fff}}</style></head><body>{before}{after}</body></html>",
+        accent = hex(accent),
     )
 }
 
@@ -535,17 +538,32 @@ fn floor_char_boundary(text: &str, at: usize) -> usize {
 mod tests {
     use super::*;
 
-    const BG: [u8; 3] = [18, 20, 24];
-    const FG: [u8; 3] = [200, 205, 212];
     const LINK: [u8; 3] = [95, 135, 190];
 
-    /// The page wears the app's colours, and the message's own markup is in it
-    /// untouched.
+    /// The page is black on white, as a mail app shows mail, and the
+    /// message's own markup is in it untouched.
     #[test]
-    fn a_message_is_rendered_in_the_apps_colours() {
-        let page = page("<p>hello <img src=\"https://acme.test/x.gif\"></p>", BG, FG, LINK);
+    fn a_message_is_drawn_black_on_white() {
+        let page = page("<p>hello <img src=\"https://acme.test/x.gif\"></p>", LINK);
         assert!(page.contains("<p>hello <img src=\"https://acme.test/x.gif\"></p>"));
-        assert!(page.contains("#121418"), "got {page}");
+        assert!(page.contains("background:#fff;color:#000"), "got {page}");
+    }
+
+    /// Text a message leaves uncoloured on a white card of its own is black,
+    /// not the theme's light text.
+    #[test]
+    fn uncoloured_text_on_a_white_card_reads() {
+        let message = "<div style=\"background:#ffffff\"><p id=\"hi\">Hi Eduárd,</p></div>";
+        let mut doc = HtmlDocument::from_html(
+            &page(message, LINK),
+            DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
+        );
+        doc.as_mut().resolve(0.0);
+        let doc = doc.as_ref();
+        let hi = doc.get_element_by_id("hi").and_then(|id| doc.get_node(id)).expect("the paragraph");
+        let colour = hi.primary_styles().expect("styled").clone_color();
+        let c = colour.components;
+        assert_eq!((c.0, c.1, c.2), (0.0, 0.0, 0.0), "black: {colour:?}");
     }
 
     /// A saved message is a whole document — doctype, `<html>`, the lot — and
@@ -560,7 +578,7 @@ mod tests {
             "<!-- saved --> \n<!doctype html><html><body><p>a message</p></body></html>",
             "<html><body><p>a message</p></body></html>",
         ] {
-            let page = page(message, BG, FG, LINK);
+            let page = page(message, LINK);
             assert_eq!(page.to_ascii_lowercase().matches("<!doctype").count(), 1, "got {page}");
             assert!(page.starts_with("<!doctype html><html><head>"), "got {page}");
             assert!(page.ends_with("</body></html>"), "got {page}");
@@ -572,7 +590,7 @@ mod tests {
     #[test]
     fn an_enormous_body_is_cut_cleanly() {
         let huge = "é".repeat(MAX_HTML);
-        let page = page(&huge, BG, FG, LINK);
+        let page = page(&huge, LINK);
         assert!(page.len() < huge.len() + 2048);
         assert!(page.starts_with("<!doctype html>"));
         assert!(page.ends_with("</body></html>"));
@@ -600,7 +618,7 @@ mod tests {
             <th style=\"width:580px;height:0\"><table width=\"100%\" style=\"height:100%\"><tbody><tr>\
             <th><p>One</p><p>Two</p><p>Three</p><p>Four</p></th></tr></tbody></table></th></tr></tbody></table>";
         let mut doc = HtmlDocument::from_html(
-            &page(message, BG, FG, LINK),
+            &page(message, LINK),
             DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
         );
         heights_are_minimums(&mut doc);
@@ -615,7 +633,7 @@ mod tests {
     fn lines_are_spaced_as_a_browser_spaces_them() {
         let message = "<p style=\"margin:0;font-size:14px;line-height:inherit\">One<br>Two</p>";
         let mut doc = HtmlDocument::from_html(
-            &page(message, BG, FG, LINK),
+            &page(message, LINK),
             DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
         );
         doc.as_mut().resolve(0.0);

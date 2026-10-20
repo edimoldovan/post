@@ -81,7 +81,7 @@ impl PostApp {
         let follow = std::mem::take(&mut self.follow_focus);
         let open = conversation.opened().map(|message| message.id.clone());
         let key = format!("{account}/{}", open.as_deref().unwrap_or(id));
-        let (background, accent) = (self.palette.bg, self.palette.accent);
+        let accent = self.palette.accent;
         // Each step of the history scrolls on its own: Back finds the
         // conversation where it was left.
         let step = self.nav.key();
@@ -144,7 +144,7 @@ impl PostApp {
                         }
                         match &page {
                             Some(page) => {
-                                self.html.show(ui, &key, &page.html, background, accent)
+                                self.html.show(ui, &key, &page.html, accent)
                             }
                             None => {
                                 self.html.close();
