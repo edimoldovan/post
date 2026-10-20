@@ -1167,7 +1167,7 @@ mod tests {
             "date": "2025-09-12 10:33",
             "subject": "Re: the quote",
             "text": "Looks good — send it.",
-            "html_path": "/home/ed/.local/share/armor/postbodies/ed@acme.com/18f3.html",
+            "html_path": "/home/ed/.local/share/post/postbodies/ed@acme.com/18f3.html",
             "unread": false,
             "marked_read": true,
             "attachments": [{"filename": "quote.pdf", "mime": "application/pdf", "bytes": 8412}]

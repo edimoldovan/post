@@ -1580,14 +1580,14 @@ mod tests {
             "date": "2025-09-12 10:33",
             "subject": "Re: the quote",
             "text": "Looks good — send it.",
-            "html_path": "/home/ed/.local/share/armor/postbodies/ed@acme.com/18f3.html",
+            "html_path": "/home/ed/.local/share/post/postbodies/ed@acme.com/18f3.html",
             "attachments": [{"filename": "quote.pdf", "mime": "application/pdf", "bytes": 8412}]
         });
         let printed = read_text(&answer);
         assert!(printed.starts_with("From: Ale <ale@acme.com>"), "got {printed}");
         assert!(printed.contains("Subject: Re: the quote"));
         assert!(printed.contains("Attachments: quote.pdf"));
-        assert!(printed.contains("HTML: /home/ed/.local/share/armor"));
+        assert!(printed.contains("HTML: /home/ed/.local/share/post"));
         assert!(printed.ends_with("Looks good — send it."));
     }
 
@@ -1606,8 +1606,8 @@ mod tests {
             "18f3 moved to the trash."
         );
         assert_eq!(
-            attachment_text(&json!({"path": "/home/ed/Armored/Attachments/quote.pdf"})),
-            "/home/ed/Armored/Attachments/quote.pdf"
+            attachment_text(&json!({"path": "/home/ed/Downloads/quote.pdf"})),
+            "/home/ed/Downloads/quote.pdf"
         );
         assert_eq!(
             add_account_text(&json!({"email": "ed@acme.com"})),
