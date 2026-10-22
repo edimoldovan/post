@@ -120,7 +120,7 @@ impl Open {
                 ..Default::default()
             },
         );
-        heights_are_minimums(&mut doc);
+        tables_as_browsers_lay_them_out(&mut doc);
         doc.as_mut().resolve(0.0);
         Open {
             key: key.to_string(),
@@ -432,20 +432,30 @@ pub fn page(html: &str, accent: [u8; 3]) -> String {
     )
 }
 
-/// A table's, a row's or a cell's `height` is a minimum: it grows to fit
-/// what is in it (CSS 2.2 §17.5.3). Blitz takes it as a fixed size, and mail
-/// leans on the difference — `height:0` on a cell, `height:100%` on the table
-/// in it — which hides the message. So each one's height is restated as the
-/// `min-height` Blitz does honour, before the document is styled.
-fn heights_are_minimums(doc: &mut HtmlDocument) {
+/// Tables as a browser lays them out, where Blitz would hide the message,
+/// restated before the document is styled:
+///
+/// - A table's, a row's or a cell's `height` is a minimum: it grows to fit
+///   what is in it (CSS 2.2 §17.5.3). Blitz takes it as a fixed size, and
+///   mail leans on the difference — `height:0` on a cell, `height:100%` on
+///   the table in it. Each is restated as the `min-height` Blitz honours.
+/// - A cell set `display:block` — as mail sets its content cell, for phones —
+///   stays in its row, in an anonymous cell (CSS 2.2 §17.2.1). Blitz leaves it
+///   out of the table, and the message with it. The `display` is dropped.
+fn tables_as_browsers_lay_them_out(doc: &mut HtmlDocument) {
     let tables = [local_name!("table"), local_name!("tr"), local_name!("td"), local_name!("th")];
     let mut changes: Vec<(NodeId, String, bool)> = Vec::new();
     let mut stack: Vec<&Node> = vec![doc.as_ref().root_node()];
     while let Some(node) = stack.pop() {
-        if node.element_data().is_some_and(|el| tables.contains(&el.name.local)) {
+        if let Some(el) = node.element_data().filter(|el| tables.contains(&el.name.local)) {
             let attribute = node.attr(local_name!("height"));
-            if let Some(style) = restated(node.attr(local_name!("style")).unwrap_or(""), attribute) {
-                changes.push((node.id, style, attribute.is_some()));
+            let style = node.attr(local_name!("style")).unwrap_or("");
+            let is_cell = el.name.local == local_name!("td") || el.name.local == local_name!("th");
+            let kept = if is_cell { cell_kept(style) } else { None };
+            let heights = restated(kept.as_deref().unwrap_or(style), attribute);
+            let drop_attribute = heights.is_some() && attribute.is_some();
+            if let Some(style) = heights.or(kept) {
+                changes.push((node.id, style, drop_attribute));
             }
         }
         stack.extend(node.children.iter().map(|&child| node.with(child)));
@@ -458,6 +468,25 @@ fn heights_are_minimums(doc: &mut HtmlDocument) {
             mutator.clear_attribute(id, name(local_name!("height")));
         }
     }
+}
+
+/// A cell's `style` without a `display` that takes it out of its row —
+/// `block` or `inline-block`. `None` when it has none; a `display:none` stays.
+fn cell_kept(style: &str) -> Option<String> {
+    let mut dropped = false;
+    let kept: Vec<&str> = style
+        .split(';')
+        .filter(|declaration| {
+            let out = declaration.split_once(':').is_some_and(|(name, value)| {
+                let value: String = value.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
+                let value = value.trim_end_matches("!important");
+                name.trim().eq_ignore_ascii_case("display") && (value == "block" || value == "inline-block")
+            });
+            dropped |= out;
+            !out
+        })
+        .collect();
+    dropped.then(|| kept.join(";"))
 }
 
 /// `style` with its `height` made `min-height` — or, when it sets no height,
@@ -621,7 +650,7 @@ mod tests {
             &page(message, LINK),
             DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
         );
-        heights_are_minimums(&mut doc);
+        tables_as_browsers_lay_them_out(&mut doc);
         doc.as_mut().resolve(0.0);
         let height = doc.as_ref().root_element().final_layout().size.height;
         assert!(height >= 4.0 * 14.0, "four lines take room: {height}");
@@ -639,6 +668,34 @@ mod tests {
         doc.as_mut().resolve(0.0);
         let body = doc.as_ref().root_element().final_layout().size.height - 2.0 * 14.0;
         assert!(body < 2.0 * 1.45 * 14.0, "two lines, closer than 1.5 apart: {body}");
+    }
+
+    /// A cell set `display:block` loses that display, staying a cell; one set
+    /// `display:none` stays hidden.
+    #[test]
+    fn a_cell_set_display_block_stays_a_cell() {
+        let kept = cell_kept("display: block !important; width:100%").expect("dropped");
+        assert!(!kept.contains("display") && kept.contains("width:100%"), "{kept}");
+        assert!(cell_kept("DISPLAY:inline-block").is_some());
+        assert_eq!(cell_kept("display:none"), None);
+        assert_eq!(cell_kept("color:red"), None);
+    }
+
+    /// Mail as it is often built: its content in the middle cell of a row,
+    /// set `display:block` for phones. What it holds takes room.
+    #[test]
+    fn a_content_cell_set_display_block_still_shows() {
+        let message = "<table width=\"100%\"><tbody><tr><td></td>\
+            <td style=\"display:block !important;max-width:600px !important;width:100% !important;margin:0 auto\">\
+            <p>One</p><p>Two</p><p>Three</p></td><td></td></tr></tbody></table>";
+        let mut doc = HtmlDocument::from_html(
+            &page(message, LINK),
+            DocumentConfig { viewport: Some(viewport(800.0, 1.0)), ..Default::default() },
+        );
+        tables_as_browsers_lay_them_out(&mut doc);
+        doc.as_mut().resolve(0.0);
+        let height = doc.as_ref().root_element().final_layout().size.height;
+        assert!(height >= 3.0 * 14.0, "three lines take room: {height}");
     }
 
     /// Only pictures are delivered: a stylesheet or a font is not one.
