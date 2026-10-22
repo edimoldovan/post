@@ -121,6 +121,7 @@ impl Open {
             },
         );
         tables_as_browsers_lay_them_out(&mut doc);
+        padded_inlines_as_boxes(&mut doc);
         doc.as_mut().resolve(0.0);
         Open {
             key: key.to_string(),
@@ -473,6 +474,50 @@ fn tables_as_browsers_lay_them_out(doc: &mut HtmlDocument) {
     }
 }
 
+/// A link or a span with a background and padding — mail's buttons — as a
+/// browser paints it: the background round the text and its padding, its
+/// corners rounded. Blitz paints an inline element's background tight round
+/// the text, and leaves no room for its padding. As an inline-block it gets
+/// both; at the line height a browser's background is drawn at.
+fn padded_inlines_as_boxes(doc: &mut HtmlDocument) {
+    let inline = [local_name!("a"), local_name!("span")];
+    let mut changes: Vec<(NodeId, String)> = Vec::new();
+    let mut stack: Vec<&Node> = vec![doc.as_ref().root_node()];
+    while let Some(node) = stack.pop() {
+        if node.element_data().is_some_and(|el| inline.contains(&el.name.local))
+            && let Some(style) = node.attr(local_name!("style")).and_then(as_box)
+        {
+            changes.push((node.id, style));
+        }
+        stack.extend(node.children.iter().map(|&child| node.with(child)));
+    }
+    let mut mutator = doc.as_mut().mutate();
+    for (id, style) in changes {
+        mutator.set_attribute(id, QualName::new(None, ns!(), local_name!("style")), &style);
+    }
+}
+
+/// `style` made an inline-block's, when it pads a background and sets no
+/// display of its own; `None` otherwise.
+fn as_box(style: &str) -> Option<String> {
+    let names: Vec<String> = style
+        .split(';')
+        .filter_map(|declaration| declaration.split_once(':'))
+        .filter(|(_, value)| {
+            let value = value.trim().to_ascii_lowercase();
+            !value.is_empty() && value != "0" && value != "0px" && value != "none" && value != "transparent"
+        })
+        .map(|(name, _)| name.trim().to_ascii_lowercase())
+        .collect();
+    let padded = names.iter().any(|name| name.starts_with("padding"));
+    let filled = names.iter().any(|name| name == "background" || name == "background-color");
+    let displayed = style.to_ascii_lowercase().contains("display");
+    (padded && filled && !displayed).then(|| {
+        let style = style.trim_end().trim_end_matches(';');
+        format!("{style};display:inline-block;line-height:normal")
+    })
+}
+
 /// A cell's `style` as a browser reads it: without a `display` that takes it
 /// out of its row — `block` or `inline-block` — and without a `max-width`.
 /// `None` when it has neither; a `display:none` stays.
@@ -728,6 +773,38 @@ mod tests {
         doc.as_mut().resolve(0.0);
         let height = doc.as_ref().root_element().final_layout().size.height;
         assert!(height >= 3.0 * 14.0, "three lines take room: {height}");
+    }
+
+    /// A link with a background and padding becomes a box; one without either
+    /// stays as it is, and so does one that sets its own display.
+    #[test]
+    fn a_padded_link_with_a_background_becomes_a_box() {
+        let style = as_box("padding:20px;line-height:40px;background-color:#3ec1e6;").expect("a button");
+        assert!(style.ends_with("display:inline-block;line-height:normal"), "{style}");
+        assert_eq!(as_box("color:#06c;text-decoration:none"), None);
+        assert_eq!(as_box("padding:4px"), None, "no background");
+        assert_eq!(as_box("background:#eee;padding:0"), None, "no padding");
+        assert_eq!(as_box("background:#eee;padding:8px;display:block"), None);
+    }
+
+    /// A mail button — a link padded round its text on a coloured background —
+    /// is laid out as large as a browser paints it: its text and its padding.
+    #[test]
+    fn a_mail_button_takes_its_padding() {
+        let message = "<p style=\"line-height:22px\"><a id=\"button\" href=\"https://acme.test\" \
+            style=\"padding:20px;line-height:40px;font-size:14px;font-weight:bold;border-radius:5px;\
+            color:#fff;text-decoration:none;background-color:#3ec1e6\">VIEW YOUR ORDERS</a></p>";
+        let mut doc = HtmlDocument::from_html(
+            &page(message, LINK),
+            DocumentConfig { viewport: Some(viewport(600.0, 1.0)), ..Default::default() },
+        );
+        padded_inlines_as_boxes(&mut doc);
+        doc.as_mut().resolve(0.0);
+        let doc = doc.as_ref();
+        let button = doc.get_element_by_id("button").and_then(|id| doc.get_node(id)).expect("the button");
+        let size = button.final_layout().size;
+        assert!(size.height > 50.0 && size.height < 70.0, "its text and 20 points above and below: {size:?}");
+        assert!(size.width > 150.0, "its text and 20 points either side: {size:?}");
     }
 
     /// Only pictures are delivered: a stylesheet or a font is not one.
