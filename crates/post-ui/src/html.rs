@@ -442,6 +442,9 @@ pub fn page(html: &str, accent: [u8; 3]) -> String {
 /// - A cell set `display:block` — as mail sets its content cell, for phones —
 ///   stays in its row, in an anonymous cell (CSS 2.2 §17.2.1). Blitz leaves it
 ///   out of the table, and the message with it. The `display` is dropped.
+/// - A cell's `max-width` is ignored by browsers. Blitz applies it, against a
+///   column sized by content, and a column of `max-width:20%` shrinks to a
+///   letter a line. The `max-width` is dropped.
 fn tables_as_browsers_lay_them_out(doc: &mut HtmlDocument) {
     let tables = [local_name!("table"), local_name!("tr"), local_name!("td"), local_name!("th")];
     let mut changes: Vec<(NodeId, String, bool)> = Vec::new();
@@ -470,8 +473,9 @@ fn tables_as_browsers_lay_them_out(doc: &mut HtmlDocument) {
     }
 }
 
-/// A cell's `style` without a `display` that takes it out of its row —
-/// `block` or `inline-block`. `None` when it has none; a `display:none` stays.
+/// A cell's `style` as a browser reads it: without a `display` that takes it
+/// out of its row — `block` or `inline-block` — and without a `max-width`.
+/// `None` when it has neither; a `display:none` stays.
 fn cell_kept(style: &str) -> Option<String> {
     let mut dropped = false;
     let kept: Vec<&str> = style
@@ -480,7 +484,9 @@ fn cell_kept(style: &str) -> Option<String> {
             let out = declaration.split_once(':').is_some_and(|(name, value)| {
                 let value: String = value.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
                 let value = value.trim_end_matches("!important");
-                name.trim().eq_ignore_ascii_case("display") && (value == "block" || value == "inline-block")
+                let name = name.trim();
+                (name.eq_ignore_ascii_case("display") && (value == "block" || value == "inline-block"))
+                    || name.eq_ignore_ascii_case("max-width")
             });
             dropped |= out;
             !out
@@ -679,6 +685,32 @@ mod tests {
         assert!(cell_kept("DISPLAY:inline-block").is_some());
         assert_eq!(cell_kept("display:none"), None);
         assert_eq!(cell_kept("color:red"), None);
+        let kept = cell_kept("width:20%;max-width:20%; Max-Width: 60%").expect("dropped");
+        assert!(!kept.to_lowercase().contains("max-width") && kept.contains("width:20%"), "{kept}");
+    }
+
+    /// An order summary as shops send it: every cell `max-width:20%` and
+    /// allowed to break anywhere. Its headers still read on one line.
+    #[test]
+    fn narrow_order_columns_keep_their_headers_on_a_line() {
+        let cell = "word-break:break-all;line-height:22px;width:20%;max-width:20%";
+        let message = format!(
+            "<table style=\"width:100%\"><thead><tr>\
+             <th style=\"{cell};width:60%;max-width:60%\">Description</th>\
+             <th id=\"quantity\" style=\"{cell}\">Quantity</th><th style=\"{cell}\">Amount</th></tr></thead>\
+             <tbody><tr><td style=\"{cell}\">Basic email renewal for 3 months</td>\
+             <td style=\"{cell}\">1</td><td style=\"{cell}\">0.00 EUR</td></tr></tbody></table>"
+        );
+        let mut doc = HtmlDocument::from_html(
+            &page(&message, LINK),
+            DocumentConfig { viewport: Some(viewport(600.0, 1.0)), ..Default::default() },
+        );
+        tables_as_browsers_lay_them_out(&mut doc);
+        doc.as_mut().resolve(0.0);
+        let doc = doc.as_ref();
+        let quantity = doc.get_element_by_id("quantity").and_then(|id| doc.get_node(id)).expect("the header");
+        let height = quantity.final_layout().size.height;
+        assert!(height < 2.0 * 22.0, "one line: {height}");
     }
 
     /// Mail as it is often built: its content in the middle cell of a row,
