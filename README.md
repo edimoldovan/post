@@ -8,14 +8,18 @@ several accounts' mail into one list.
 
 Later, Post will support more email providers.
 
-Post, Grido and omarchy-kit are made together:
+Post, Grido, Podium, Viode and omarchy-kit are made together:
 
 - [**Post**](https://github.com/edimoldovan/post) — Gmail as a native window
   on Linux, a command in the terminal, and tools for Claude.
 - [**Grido**](https://github.com/edimoldovan/grido) — a fast native
   spreadsheet for `.xlsx` files, and tools for Claude.
+- [**Podium**](https://github.com/edimoldovan/podium) — presentations built
+  from a storyline, exported to PDF, PowerPoint and HTML, and tools for Claude.
+- [**Viode**](https://github.com/edimoldovan/viode) — a professional video
+  editor on Linux and macOS, a command in the terminal, and tools for Claude.
 - [**omarchy-kit**](https://github.com/edimoldovan/omarchy-kit) — the egui
-  elements both apps are built from, in the Omarchy theme's colours.
+  elements the apps are built from, in the Omarchy theme's colours.
 
 <img src="docs/reading.png" width="880" alt="Post with three accounts, the inbox and a conversation open">
 
