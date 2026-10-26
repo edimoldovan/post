@@ -120,6 +120,7 @@ impl PostApp {
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
+        hyprland_front();
     }
 
     /// The commands the keyboard asked for this frame.
@@ -924,6 +925,24 @@ impl PostApp {
             self.last_title = title;
         }
     }
+}
+
+
+/// Hyprland does not let a window bring itself forward, so it is asked to
+/// focus this process's window: it switches to the window's workspace and
+/// raises it over whatever covers it. Elsewhere this does nothing.
+fn hyprland_front() {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return;
+    }
+    let window = format!("pid:{}", std::process::id());
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("hyprctl")
+            .args(["dispatch", "focuswindow", &window])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    });
 }
 
 #[cfg(test)]
