@@ -34,6 +34,8 @@
 # Reply: the one bare letter, because it is the one thing you do to a message
 # you are reading, and it is the letter every mail client uses for it.
 "R" = "reply"
+# Reply all: "A", as Gmail has it.
+"A" = "reply_all"
 # Forward: the letter every mail client uses for it.
 "F" = "forward"
 # Search this account: "/", as Gmail has it — Shift+/ where "/" is shifted.

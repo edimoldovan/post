@@ -142,7 +142,7 @@ impl PostApp {
         let writing = top.writing();
         let reading = top.message().is_some();
         match cmd {
-            Command::Reply | Command::Forward | Command::MarkUnread => reading,
+            Command::Reply | Command::ReplyAll | Command::Forward | Command::MarkUnread => reading,
             Command::Send | Command::Attach | Command::Discard => writing && !self.screen.sending,
             Command::Copies => writing && !self.screen.copies,
             Command::Delete => reading || mail_list,

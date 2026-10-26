@@ -28,8 +28,10 @@ pub enum Command {
     Delete,
     /// Put the unread flag back on the message on screen.
     MarkUnread,
-    /// Write a reply to the message on screen.
+    /// Write a reply to the message on screen, to its sender.
     Reply,
+    /// Write a reply to the message on screen, to everyone on it.
+    ReplyAll,
     /// Write a new email from the account on screen.
     New,
     /// Send what is being written.
@@ -78,6 +80,7 @@ impl Command {
             "delete" => Delete,
             "mark_unread" => MarkUnread,
             "reply" => Reply,
+            "reply_all" => ReplyAll,
             "new" => New,
             "send" => Send,
             "copy" => Copy,
@@ -113,6 +116,7 @@ impl Command {
             Delete => "Delete",
             MarkUnread => "Mark unread",
             Reply => "Reply",
+            ReplyAll => "Reply all",
             New => "New email",
             Send => "Send",
             Copy => "Copy selection",
@@ -133,9 +137,10 @@ impl Command {
 
     /// Every command there is, in the order the palette lists them: what is
     /// done to mail first, then where to go, then how to move.
-    pub const ALL: [Command; 26] = [
+    pub const ALL: [Command; 27] = [
         Command::New,
         Command::Reply,
+        Command::ReplyAll,
         Command::Forward,
         Command::Send,
         Command::Attach,
@@ -178,6 +183,7 @@ impl Command {
             Delete => "delete",
             MarkUnread => "mark_unread",
             Reply => "reply",
+            ReplyAll => "reply_all",
             New => "new",
             Send => "send",
             Copy => "copy",

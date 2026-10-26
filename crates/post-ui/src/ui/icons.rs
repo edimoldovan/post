@@ -76,6 +76,21 @@ fn build(rect: Rect, name: &str, color: Color32) -> Option<Vec<Shape>> {
                     thin,
                 ));
             }
+            // Reply all: Reply's arrow with a second head behind it.
+            "reply_all" => {
+                push(Shape::line(
+                    vec![p(0.46, 0.20), p(0.20, 0.42), p(0.46, 0.64)],
+                    thick,
+                ));
+                push(Shape::line(
+                    vec![p(0.30, 0.20), p(0.04, 0.42), p(0.30, 0.64)],
+                    thin,
+                ));
+                push(Shape::line(
+                    vec![p(0.20, 0.42), p(0.62, 0.42), p(0.84, 0.56), p(0.88, 0.84)],
+                    thin,
+                ));
+            }
             // Send: away and upward, with the head on the far end.
             "send" => {
                 line((0.14, 0.84), (0.78, 0.26));
@@ -272,7 +287,7 @@ mod tests {
     fn every_icon_the_window_uses_is_drawn() {
         let rect = Rect::from_min_size(Pos2::ZERO, eframe::egui::Vec2::splat(24.0));
         for name in [
-            "mail", "mail_open", "account", "back", "refresh", "plus", "unread", "reply", "send",
+            "mail", "mail_open", "account", "back", "refresh", "plus", "unread", "reply", "reply_all", "send",
             "download", "save_as", "compose", "gear", "more", "inbox", "star", "important",
             "draft", "spam", "label", "forward", "close", "keyboard",
             // These come from the shared set.

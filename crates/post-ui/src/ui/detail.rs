@@ -51,6 +51,7 @@ impl PostApp {
         let hints = Hints {
             back: hint(Command::Back),
             reply: hint(Command::Reply),
+            reply_all: hint(Command::ReplyAll),
             forward: hint(Command::Forward),
             delete: hint(Command::Delete),
             unread: hint(Command::MarkUnread),
@@ -216,13 +217,14 @@ impl PostApp {
 struct Hints {
     back: String,
     reply: String,
+    reply_all: String,
     forward: String,
     delete: String,
     unread: String,
 }
 
 /// The reader's bar: the back arrow where the list is not beside it, Reply,
-/// Forward, and at the far end Delete, with the rest behind ⋯. Quiet buttons,
+/// Reply all, Forward, and at the far end Delete, with the rest behind ⋯. Quiet buttons,
 /// their words and keys where there is room.
 fn toolbar(ui: &mut Ui, back: bool, labels: bool, hints: &Hints, out: &mut Vec<Command>) {
     ui.add_space(6.0);
@@ -235,6 +237,12 @@ fn toolbar(ui: &mut Ui, back: bool, labels: bool, hints: &Hints, out: &mut Vec<C
             .clicked()
         {
             out.push(Command::Reply);
+        }
+        if ui
+            .add(tool("reply_all", "Reply all", &hints.reply_all, labels))
+            .clicked()
+        {
+            out.push(Command::ReplyAll);
         }
         if ui
             .add(tool("forward", "Forward", &hints.forward, labels))

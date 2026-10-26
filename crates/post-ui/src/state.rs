@@ -660,6 +660,8 @@ impl PostApp {
                     if screen.draft.is_none() {
                         screen.to = draft.to.clone();
                         screen.cc = draft.cc.clone();
+                        // A reply to everyone shows who else it goes to.
+                        screen.copies |= !draft.cc.is_empty();
                         // A forward opens with its subject and the message's
                         // own files, both the reader's from here.
                         if matches!(route, Route::Forward { .. }) {
@@ -1427,7 +1429,7 @@ mod tests {
     #[test]
     fn a_sent_reply_leaves_the_conversation_to_be_fetched_again() {
         let mut app = opened("18f3");
-        app.goto(Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f3".to_string() });
+        app.goto(Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f3".to_string(), all: false });
         app.screen.sending = true;
         app.absorb(Done::Sent {
             to: "ale@acme.com".to_string(),

@@ -60,11 +60,13 @@ pub enum Route {
         folder: String,
         id: String,
     },
-    /// `/:account/:folder/:id/reply`: a reply being written to one message.
+    /// `/:account/:folder/:id/reply`: a reply being written to one message,
+    /// to its sender; `…/reply-all`, to everyone on it.
     Reply {
         account: String,
         folder: String,
         id: String,
+        all: bool,
     },
     /// `/:account/new?…`: a new email from one account, its fields filled in
     /// from the query — `to`, `cc`, `bcc`, `subject`, `body`, `attach` — the
@@ -154,7 +156,7 @@ impl Route {
                 account: account.clone(),
                 folder: folder.clone(),
             }),
-            Route::Reply { account, folder, id } | Route::Forward { account, folder, id } => {
+            Route::Reply { account, folder, id, .. } | Route::Forward { account, folder, id } => {
                 Some(Route::Message {
                     account: account.clone(),
                     folder: folder.clone(),
@@ -207,13 +209,14 @@ impl Route {
                     id: id.to_string(),
                 })
             }
-            [account, "search", query, id, "reply"]
+            [account, "search", query, id, verb @ ("reply" | "reply-all")]
                 if [account, query, id].iter().all(|w| named(w)) =>
             {
                 Some(Route::Reply {
                     account: account.to_string(),
                     folder: searching(query),
                     id: id.to_string(),
+                    all: *verb == "reply-all",
                 })
             }
             [account, "search", query, id, "forward"]
@@ -247,11 +250,12 @@ impl Route {
                     id: id.to_string(),
                 })
             }
-            [account, folder, id, "reply"] if [account, folder, id].iter().all(|w| named(w)) => {
+            [account, folder, id, verb @ ("reply" | "reply-all")] if [account, folder, id].iter().all(|w| named(w)) => {
                 Some(Route::Reply {
                     account: account.to_string(),
                     folder: folder.to_string(),
                     id: id.to_string(),
+                    all: *verb == "reply-all",
                 })
             }
             [account, folder, id, "forward"] if [account, folder, id].iter().all(|w| named(w)) => {
@@ -285,10 +289,11 @@ impl Route {
                 folder: INBOX.to_string(),
                 id: value(id)?,
             }),
-            ["reply", email, id] => Some(Route::Reply {
+            [verb @ ("reply" | "reply-all"), email, id] => Some(Route::Reply {
                 account: value(email)?,
                 folder: INBOX.to_string(),
                 id: value(id)?,
+                all: *verb == "reply-all",
             }),
             // What the desktop hands a mail app for a mailto: link. It goes
             // from the first account connected; with none, there is nothing
@@ -314,8 +319,9 @@ impl fmt::Display for Route {
             Route::Message { account, folder, id } => {
                 write!(f, "/{}/{}/{}", encode(account), place(folder), encode(id))
             }
-            Route::Reply { account, folder, id } => {
-                write!(f, "/{}/{}/{}/reply", encode(account), place(folder), encode(id))
+            Route::Reply { account, folder, id, all } => {
+                let verb = if *all { "reply-all" } else { "reply" };
+                write!(f, "/{}/{}/{}/{verb}", encode(account), place(folder), encode(id))
             }
             Route::Forward { account, folder, id } => {
                 write!(f, "/{}/{}/{}/forward", encode(account), place(folder), encode(id))
@@ -656,6 +662,7 @@ mod tests {
                 account: "ed@acme.com".to_string(),
                 folder: "SENT".to_string(),
                 id: "18f3a2c9b1".to_string(),
+                all: false,
             },
             Route::New {
                 account: "second@acme.com".to_string(),
@@ -695,6 +702,13 @@ mod tests {
                 account: "ed@acme.com".to_string(),
                 folder: searching("invoice"),
                 id: "18f3".to_string(),
+                all: false,
+            },
+            Route::Reply {
+                account: "ed@acme.com".to_string(),
+                folder: INBOX.to_string(),
+                id: "18f3".to_string(),
+                all: true,
             },
         ] {
             assert_eq!(Route::parse(&route.to_string()), Some(route.clone()), "{route}");
@@ -800,6 +814,7 @@ mod tests {
                 account: "ed@acme.com".to_string(),
                 folder: INBOX.to_string(),
                 id: "18f3a2c9b1".to_string(),
+                all: false,
             })
         );
         assert_eq!(
@@ -820,6 +835,7 @@ mod tests {
             account: "ed@acme.com".to_string(),
             folder: INBOX.to_string(),
             id: "18f3".to_string(),
+            all: false,
         };
         assert_eq!(reply.account(), Some("ed@acme.com"));
         assert_eq!(reply.message(), None);
@@ -877,6 +893,7 @@ mod tests {
             account: "ed@acme.com".to_string(),
             folder: INBOX.to_string(),
             id: "a".to_string(),
+            all: false,
         };
         let mut router: Router<u8> = Router::of(reply.clone());
         assert_eq!(router.depth(), 3, "opened straight at a reply");

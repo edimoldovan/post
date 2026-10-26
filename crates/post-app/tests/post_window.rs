@@ -214,6 +214,7 @@ fn the_command_line_and_the_wire_agree_on_the_route() {
                 account: "ed@acme.com".to_string(),
                 folder: INBOX.to_string(),
                 id: "18f3".to_string(),
+                all: false,
             },
         ),
         (
@@ -326,6 +327,7 @@ fn the_words_a_window_is_started_with_are_the_route_itself() {
             account: "ed@acme.com".to_string(),
             folder: INBOX.to_string(),
             id: "18f3a2c9b1".to_string(),
+            all: false,
         },
         Route::New {
             account: "ed@acme.com".to_string(),

@@ -189,7 +189,8 @@ impl PostApp {
             Command::Last => self.to_end(),
             Command::Delete => self.delete_current(),
             Command::MarkUnread => self.mark_unread(),
-            Command::Reply => self.reply(),
+            Command::Reply => self.reply(false),
+            Command::ReplyAll => self.reply(true),
             Command::Forward => self.forward(),
             Command::Left => self.left(),
             Command::Right => self.right(),
@@ -283,7 +284,7 @@ impl PostApp {
     /// A reply answers the newest message on the conversation, whichever one
     /// the keyboard happens to be resting on — that is what "reply" means in a
     /// conversation, and it is what keeps it on one thread.
-    fn reply(&mut self) {
+    fn reply(&mut self, all: bool) {
         if self.nav.top().message().is_none() {
             return;
         }
@@ -296,7 +297,7 @@ impl PostApp {
         ) else {
             return;
         };
-        self.goto(Route::Reply { account, folder: self.folder(), id });
+        self.goto(Route::Reply { account, folder: self.folder(), id, all });
     }
 
     /// Forwards the message open in the conversation on screen — the one being
@@ -857,13 +858,15 @@ impl PostApp {
             // and the subject off the message being answered. Nothing is sent,
             // and the body that replaces it is the one the reader types.
             Route::New { .. } => None,
-            Route::Reply { account, id, .. } => self.screen.draft.is_none().then(|| Job::Draft {
+            // A reply to the sender leaves the others off; a reply to all
+            // copies everyone the message was to or copied to.
+            Route::Reply { account, id, all, .. } => self.screen.draft.is_none().then(|| Job::Draft {
                 account: account.clone(),
                 id: id.clone(),
                 body: String::new(),
                 attach: Vec::new(),
                 to: None,
-                cc: None,
+                cc: if *all { None } else { Some(String::new()) },
                 bcc: None,
                 draft_id: None,
             }),
@@ -1048,7 +1051,7 @@ mod tests {
     /// A conversation open, and Reply pressed on it.
     fn replying() -> PostApp {
         let mut app = reading("18f7");
-        app.reply();
+        app.reply(false);
         app
     }
 
@@ -1059,7 +1062,7 @@ mod tests {
         let app = replying();
         assert_eq!(
             app.nav.top(),
-            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string() }
+            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string(), all: false }
         );
         assert_eq!(app.nav.depth(), 3, "the inbox, the message, the reply");
         assert!(app.screen.compose.is_empty(), "a reply starts empty");
@@ -1072,7 +1075,7 @@ mod tests {
         // Nothing to reply to is not a reply: from the list, Reply does
         // nothing rather than composing to whatever was selected.
         let mut list = inbox(40);
-        list.reply();
+        list.reply(false);
         assert_eq!(
             list.nav.top(),
             &Route::inbox("ed@acme.com".to_string())
@@ -1180,10 +1183,25 @@ mod tests {
         assert_eq!(app.screen.compose, "Looks good.");
         assert_eq!(
             app.nav.top(),
-            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string() },
+            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string(), all: false },
             "still in the reply, where the words are"
         );
         assert!(app.status.contains("403"), "got {}", app.status);
+    }
+
+    /// Reply answers the sender and leaves the others off; Reply all asks for
+    /// everyone the message was to or copied to.
+    #[test]
+    fn reply_answers_the_sender_and_reply_all_everyone() {
+        let reply = replying();
+        assert!(matches!(reply.screen_job(), Some(Job::Draft { cc: Some(ref cc), .. }) if cc.is_empty()));
+        let mut all = reading("18f7");
+        all.reply(true);
+        assert_eq!(
+            all.nav.top(),
+            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string(), all: true }
+        );
+        assert!(matches!(all.screen_job(), Some(Job::Draft { cc: None, .. })));
     }
 
     /// The keys that act on a message do nothing to a reply: there is no row
@@ -1260,10 +1278,10 @@ mod tests {
             0,
             "the keyboard is on the oldest"
         );
-        app.reply();
+        app.reply(false);
         assert_eq!(
             app.nav.top(),
-            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string() },
+            &Route::Reply { account: "ed@acme.com".to_string(), folder: INBOX.to_string(), id: "18f7".to_string(), all: false },
             "and the reply still answers the newest"
         );
     }
@@ -1341,6 +1359,7 @@ mod tests {
             account: "ed@acme.com".to_string(),
             folder: INBOX.to_string(),
             id: "18f7".to_string(),
+            all: false,
         });
         app.screen.sending = true;
         app.absorb(Done::Sent {
