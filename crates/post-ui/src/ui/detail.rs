@@ -292,8 +292,27 @@ pub fn tip(what: &str, key: &str) -> String {
 /// The open message's header: the sender's initial, name and address, the
 /// account it came to in that account's colour, and when. Clicking it closes
 /// the message, as clicking its line would.
+/// Where the recipient lists start: past the avatar, the label and the mark.
+const LISTS: f32 = 100.0;
+
 fn sender_block(ui: &mut Ui, message: &Message, account: &str, colour: Color32, follow: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 60.0), Sense::click());
+    // Who it went to: To, Cc and Bcc a line each, as mail clients show them,
+    // every list whole, wrapped over as many lines as it needs. The block is
+    // as tall as they come to.
+    let weak = ui.visuals().weak_text_color();
+    let room = (ui.available_width() - LISTS - 4.0).max(40.0);
+    let lists: Vec<(&str, String, std::sync::Arc<eframe::egui::Galley>)> = recipients(message, account)
+        .into_iter()
+        .filter(|(_, who)| !who.is_empty())
+        .map(|(label, who)| {
+            let job = eframe::egui::text::LayoutJob::simple(who.clone(), FontId::proportional(13.0), weak, room);
+            let galley = ui.painter().layout_job(job);
+            (label, who, galley)
+        })
+        .collect();
+    let listed: f32 = lists.iter().map(|(_, _, galley)| galley.size().y + 4.0).sum();
+    let height = (33.0 + listed + 8.0).max(60.0);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
     if follow {
         ui.scroll_to_rect(rect, None);
     }
@@ -305,7 +324,7 @@ fn sender_block(ui: &mut Ui, message: &Message, account: &str, colour: Color32, 
     );
     let (name, address) = split_sender(&message.from);
 
-    let centre = Pos2::new(rect.min.x + 22.0, rect.center().y);
+    let centre = Pos2::new(rect.min.x + 22.0, rect.min.y + 30.0);
     ui.painter().circle_filled(centre, 21.0, visuals.faint_bg_color);
     ui.painter().text(
         centre,
@@ -345,24 +364,31 @@ fn sender_block(ui: &mut Ui, message: &Message, account: &str, colour: Color32, 
             weak,
         );
     }
-    let second = rect.min.y + 41.0;
-    let to = painter
-        .text(Pos2::new(x, second), Align2::LEFT_CENTER, "to", FontId::proportional(13.0), weak)
-        .max
-        .x;
-    painter.rect_filled(
-        Rect::from_center_size(Pos2::new(to + 11.0, second), Vec2::splat(9.0)),
-        2.0,
-        colour,
-    );
-    painter.text(
-        Pos2::new(to + 21.0, second),
-        Align2::LEFT_CENTER,
-        account,
-        FontId::proportional(13.0),
-        weak,
-    );
-    resp.on_hover_text("Close this message").clicked()
+    let mut top = rect.min.y + 33.0;
+    let mut everyone = Vec::new();
+    for (i, (label, who, galley)) in lists.into_iter().enumerate() {
+        let row = galley.rows.first().map_or(16.0, |r| r.height());
+        ui.painter().text(Pos2::new(x, top), Align2::LEFT_TOP, label, FontId::proportional(13.0), weak);
+        // The account it came to, in its colour, on the To line.
+        if i == 0 {
+            let mark = Rect::from_center_size(Pos2::new(x + 32.5, top + row / 2.0), Vec2::splat(9.0));
+            ui.painter().rect_filled(mark, 2.0, colour);
+        }
+        let height = galley.size().y;
+        ui.painter().galley(Pos2::new(rect.min.x + LISTS, top), galley, weak);
+        top += height + 4.0;
+        everyone.push(format!("{label} {who}"));
+    }
+    resp.on_hover_text(format!("{}\n\nClick to close this message", everyone.join("\n"))).clicked()
+}
+
+/// Who a message went to, as the header's lines show them: its To, Cc and
+/// Bcc, bare addresses. One that names nobody in To — sent Bcc — went to the
+/// account it is in.
+fn recipients(message: &Message, account: &str) -> [(&'static str, String); 3] {
+    let list = |header: &str| post::reply::addresses(header).join(", ");
+    let to = list(&message.to);
+    [("to", if to.is_empty() { account.to_string() } else { to }), ("cc", list(&message.cc)), ("bcc", list(&message.bcc))]
 }
 
 /// "Name <address>" as its two halves. A bare address is its own name.
@@ -641,5 +667,32 @@ fn size(bytes: u64) -> String {
         b if b < 1024 => format!("{b} B"),
         b if b < 1024 * 1024 => format!("{} KB", (b + 512) / 1024),
         b => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// To, Cc and Bcc each on a line of their own, bare addresses; a message
+    /// that names nobody in To went to the account it is in.
+    #[test]
+    fn the_header_names_everyone_it_went_to() {
+        let message = Message {
+            to: "Ed <himself@eduardmoldovan.com>, erik@acme.com".into(),
+            cc: "\"Biolchi, Ale\" <ale@acme.com>".into(),
+            bcc: "cristiano@ey.com".into(),
+            ..Message::default()
+        };
+        assert_eq!(
+            recipients(&message, "himself@eduardmoldovan.com"),
+            [
+                ("to", "himself@eduardmoldovan.com, erik@acme.com".to_string()),
+                ("cc", "ale@acme.com".to_string()),
+                ("bcc", "cristiano@ey.com".to_string()),
+            ]
+        );
+        let unnamed = Message::default();
+        assert_eq!(recipients(&unnamed, "ed@acme.com")[0], ("to", "ed@acme.com".to_string()));
     }
 }

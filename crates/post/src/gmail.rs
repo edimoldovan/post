@@ -468,6 +468,10 @@ fn whole(email: &str, message: &Value, marked: bool) -> Value {
     row.insert("text".to_string(), json!(mime::cap(&text, mime::MAX_TEXT)));
     row.insert("html_path".to_string(), html_path);
     row.insert("attachments".to_string(), json!(attachments));
+    // Everyone else it was copied to — and, on mail this account sent, copied
+    // to unseen — beside the listing row's To.
+    row.insert("cc".to_string(), json!(mime::header(&payload, "Cc").unwrap_or_default()));
+    row.insert("bcc".to_string(), json!(mime::header(&payload, "Bcc").unwrap_or_default()));
     row.insert("unread".to_string(), json!(!marked));
     row.insert("marked_read".to_string(), json!(marked));
     answer
@@ -1080,6 +1084,8 @@ fn cached_message(email: &str, id: &str) -> Option<Value> {
     let mut message: Value = serde_json::from_str(&text).ok()?;
     // A file with no message in it is not a message.
     message.get("id").and_then(Value::as_str)?;
+    // One kept before its copies were is read again, so Cc and Bcc show.
+    message.get("bcc")?;
     // Its HTML is where bodies are kept now: a path saved before the state
     // dir moved names a file that is not there any more. A body that is gone
     // altogether is fetched again, rather than the message shown without it.
@@ -1556,6 +1562,8 @@ mod tests {
             let answer = json!({
                 "id": "18f3a2c9b1",
                 "from": "Ale <ale@acme.com>",
+                "cc": "",
+                "bcc": "",
                 "subject": "Re: the quote",
                 "date": "2025-09-12 10:33",
                 "text": "Looks good — send it.",
@@ -1583,19 +1591,19 @@ mod tests {
         paths::with_state_dir(|_| {
             let email = "unmarked@acme.com";
             let unmarked = json!({
-                "id": "18f3", "text": "hi", "unread": true, "marked_read": false,
+                "id": "18f3", "text": "hi", "cc": "", "bcc": "", "unread": true, "marked_read": false,
             });
             save_message(email, "18f3", &unmarked);
             assert!(!paths::read_cache_file(email, "18f3").exists());
             assert_eq!(cached_message(email, "18f3"), None);
 
             // A message with nothing to say about the flag is not kept either.
-            save_message(email, "18f3", &json!({"id": "18f3", "text": "hi"}));
+            save_message(email, "18f3", &json!({"id": "18f3", "text": "hi", "cc": "", "bcc": ""}));
             assert_eq!(cached_message(email, "18f3"), None);
 
             // Marked read, and it is kept — that is the whole condition.
             let marked = json!({
-                "id": "18f3", "text": "hi", "unread": false, "marked_read": true,
+                "id": "18f3", "text": "hi", "cc": "", "bcc": "", "unread": false, "marked_read": true,
             });
             save_message(email, "18f3", &marked);
             assert_eq!(cached_message(email, "18f3"), Some(marked));
@@ -1609,7 +1617,7 @@ mod tests {
         paths::with_state_dir(|_| {
             let email = "moved@acme.com";
             let kept = json!({
-                "id": "18f3", "text": "hi", "unread": false, "marked_read": true,
+                "id": "18f3", "text": "hi", "cc": "", "bcc": "", "unread": false, "marked_read": true,
                 "html_path": "/home/ed/.local/share/elsewhere/postbodies/moved@acme.com/18f3.html",
             });
             save_message(email, "18f3", &kept);
@@ -1621,9 +1629,19 @@ mod tests {
             assert_eq!(found["html_path"], json!(body.display().to_string()));
 
             // A message without HTML has no body to find.
-            let plain = json!({"id": "18f4", "text": "hi", "marked_read": true, "html_path": null});
+            let plain = json!({"id": "18f4", "text": "hi", "cc": "", "bcc": "", "marked_read": true, "html_path": null});
             save_message(email, "18f4", &plain);
             assert_eq!(cached_message(email, "18f4"), Some(plain));
+        });
+    }
+
+    /// A message kept before its Cc and Bcc were is read again, so they show.
+    #[test]
+    fn a_message_kept_without_its_copies_is_read_again() {
+        paths::with_state_dir(|_| {
+            let email = "copies@acme.com";
+            save_message(email, "18f5", &json!({"id": "18f5", "text": "hi", "marked_read": true}));
+            assert_eq!(cached_message(email, "18f5"), None);
         });
     }
 
@@ -1651,7 +1669,7 @@ mod tests {
             save_message(
                 email,
                 "18f3",
-                &json!({"id": "18f3", "text": "hi", "marked_read": true}),
+                &json!({"id": "18f3", "text": "hi", "cc": "", "bcc": "", "marked_read": true}),
             );
             assert!(paths::read_cache_file(email, "18f3").exists());
             assert!(cached_message(email, "18f3").is_some());

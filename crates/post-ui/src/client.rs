@@ -251,6 +251,11 @@ pub struct Message {
     pub id: String,
     pub account: String,
     pub from: String,
+    /// Its To, Cc and Bcc headers, as written: who else it went to. Only
+    /// mail this account sent still names its Bcc.
+    pub to: String,
+    pub cc: String,
+    pub bcc: String,
     pub subject: String,
     pub date: String,
     /// The body as text: what a plain-text message says, and what an HTML one
@@ -278,6 +283,9 @@ impl Message {
             id: text("id"),
             account: account.to_string(),
             from: text("from"),
+            to: text("to"),
+            cc: text("cc"),
+            bcc: text("bcc"),
             subject: text("subject"),
             date: text("date"),
             text: text("text"),
