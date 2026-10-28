@@ -18,9 +18,10 @@ use eframe::egui::{
     Stroke, Ui, Vec2,
 };
 
-use omarchy_kit::{Item, Size, TextField, Toggle};
+use omarchy_kit::{Item, Size, TextField, Toggle, context_menu};
 
 use crate::client::{Job, Thread};
+use crate::commands::Command;
 use crate::route::{INBOX, Route, query_of, searching};
 use crate::state::{Pane, PostApp};
 use crate::ui::icons;
@@ -43,10 +44,25 @@ const CHIP_GAP: f32 = 6.0;
 /// it is already there when the reader gets to the bottom.
 const NEAR_END: f32 = ROW_H * 2.0;
 
-/// What a click on a row asked for.
+/// What a click on a row, or a line of its menu, asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Hit {
     Open,
     Delete,
+    Reply,
+    ReplyAll,
+    Forward,
+    /// Read, or unread: the whole conversation.
+    Mark(bool),
+}
+
+/// The keys the row menu's lines are also on, as the keymap has them.
+struct RowKeys {
+    open: String,
+    reply: String,
+    reply_all: String,
+    forward: String,
+    delete: String,
 }
 
 impl PostApp {
@@ -57,6 +73,19 @@ impl PostApp {
         // The keyboard's row is outlined only in the list the keyboard is in.
         let keyed_list = self.pane() == Pane::List && self.list_step() == Some(step);
         let name = self.name_of(account);
+        let key = |cmd| {
+            self.keymap
+                .shortcut_for(cmd)
+                .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
+                .unwrap_or_default()
+        };
+        let keys = RowKeys {
+            open: key(Command::Open),
+            reply: key(Command::Reply),
+            reply_all: key(Command::ReplyAll),
+            forward: key(Command::Forward),
+            delete: key(Command::Delete),
+        };
         let Some((route, screen)) = self.step_of(Some(step)) else {
             return;
         };
@@ -169,7 +198,7 @@ impl PostApp {
                         .as_deref()
                         .is_some_and(|id| row.id == id || row.ids.iter().any(|m| m == id));
                     let keyed = keyed_list && i == focus;
-                    if let Some(what) = message_row(ui, row, shown, keyed, keyed && follow) {
+                    if let Some(what) = message_row(ui, row, shown, keyed, keyed && follow, &keys) {
                         focused = Some(i);
                         hit = Some((what, row.clone()));
                     }
@@ -203,6 +232,36 @@ impl PostApp {
             Some((Hit::Delete, thread)) => {
                 for id in &thread.ids {
                     self.delete(account, id);
+                }
+            }
+            // A reply and a forward answer the newest message on it, as they
+            // do from the reader.
+            Some((what @ (Hit::Reply | Hit::ReplyAll), thread)) => {
+                if let Some(id) = thread.ids.first() {
+                    self.goto(Route::Reply {
+                        account: account.to_string(),
+                        folder: folder.clone(),
+                        id: id.clone(),
+                        all: what == Hit::ReplyAll,
+                    });
+                }
+            }
+            Some((Hit::Forward, thread)) => {
+                if let Some(id) = thread.ids.first() {
+                    self.goto(Route::Forward {
+                        account: account.to_string(),
+                        folder: folder.clone(),
+                        id: id.clone(),
+                    });
+                }
+            }
+            Some((Hit::Mark(read), thread)) => {
+                for id in &thread.ids {
+                    self.start(Job::Mark {
+                        account: account.to_string(),
+                        id: id.clone(),
+                        read,
+                    });
                 }
             }
             None => {}
@@ -248,6 +307,7 @@ fn message_row(
     open: bool,
     focused: bool,
     follow: bool,
+    keys: &RowKeys,
 ) -> Option<Hit> {
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
@@ -351,6 +411,40 @@ fn message_row(
     } else {
         "Open this conversation"
     });
+
+    // The right button: what every mail client offers on a line of its list.
+    // A draft is only opened or thrown away.
+    let mut chosen = None;
+    let draft = !row.latest.draft_id.is_empty();
+    context_menu(&resp, |m| {
+        if m.item("Open").key(keys.open.clone()).clicked() {
+            chosen = Some(Hit::Open);
+        }
+        if !draft {
+            m.separator();
+            if m.item("Reply").key(keys.reply.clone()).clicked() {
+                chosen = Some(Hit::Reply);
+            }
+            if m.item("Reply all").key(keys.reply_all.clone()).clicked() {
+                chosen = Some(Hit::ReplyAll);
+            }
+            if m.item("Forward").key(keys.forward.clone()).clicked() {
+                chosen = Some(Hit::Forward);
+            }
+            m.separator();
+            let (label, read) = if row.unread { ("Mark as read", true) } else { ("Mark as unread", false) };
+            if m.item(label).clicked() {
+                chosen = Some(Hit::Mark(read));
+            }
+        }
+        m.separator();
+        if m.item("Delete").key(keys.delete.clone()).clicked() {
+            chosen = Some(Hit::Delete);
+        }
+    });
+    if chosen.is_some() {
+        return chosen;
+    }
     if !resp.clicked() {
         return None;
     }
