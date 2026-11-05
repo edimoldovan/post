@@ -6,7 +6,7 @@
 # PageUp, PageDown, Delete, Backspace, Enter, Tab, Escape, Space, "/"...
 #
 # One scheme: bare keys move around the views, Ctrl+<letter> does something.
-# No function keys (F1 stays only as the old hand's alias for the palette).
+# No function keys.
 #
 # Post looks for this file in: $POST_KEYMAP, ./keymap.toml,
 # ~/.config/post/keymap.toml — first hit wins. Edit and restart.
@@ -57,8 +57,3 @@
 # --- Every action, found by typing ---
 # Opens even while a text field has the keyboard.
 "Ctrl+K" = "palette"
-"Ctrl+/" = "palette"
-# On layouts where "/" is a shifted key (Swedish: Shift+7), the same press
-# arrives with Shift on it.
-"Ctrl+Shift+/" = "palette"
-"F1" = "palette"

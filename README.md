@@ -173,7 +173,7 @@ flowchart LR
 | `Ctrl+,` · `Home` | Settings |
 | `Ctrl+R` | Refresh what is on screen |
 | `Ctrl+C` | Copy the selection |
-| `Ctrl+K` · `Ctrl+/` · `F1` | Every action and its key: the palette |
+| `Ctrl+K` | Every action and its key: the palette |
 | `Ctrl+W` | Close the window |
 
 **The palette has every action there is, found by typing.** `Ctrl+K` opens it,

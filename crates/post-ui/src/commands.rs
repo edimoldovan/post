@@ -287,10 +287,8 @@ mod tests {
         })
     }
 
-    /// No command is reachable only by a function key. F1 is the old hand's
-    /// alias for the shortcut viewer, and an alias is a second way to a
-    /// command, never the only one — a keyboard without a function row still
-    /// drives the whole window.
+    /// No command is reachable only by a function key — a keyboard without a
+    /// function row still drives the whole window.
     #[test]
     fn no_command_is_reachable_only_by_a_function_key() {
         assert!(function_key("F1") && function_key("Ctrl+F5"));
