@@ -6,16 +6,16 @@
 //! newest message on the third.
 //!
 //! A row is painted rather than assembled out of widgets, the way Grido paints
-//! its grid: the whole row is one click target, with the trash a zone at its
-//! right-hand end while the pointer is on it. Unread is carried by weight — the
+//! its grid: the whole row is one click target, and a row swiped left with
+//! two fingers goes to the trash, as on a phone. Unread is carried by weight — the
 //! app's font has one face, so the glyphs are struck twice a third of a pixel
 //! apart, which is what a bold face does — and by a dot in the margin, never by
 //! a badge.
 
 use eframe::egui::text::{LayoutJob, TextFormat, TextWrapping};
 use eframe::egui::{
-    Align, Align2, Color32, FontId, Key, Layout, Painter, Pos2, Rect, RichText, ScrollArea, Sense,
-    Stroke, Ui, Vec2,
+    Align, Align2, Color32, Event, FontId, Id, Key, Layout, MouseWheelUnit, Painter, Pos2, Rect,
+    RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
 };
 
 use omarchy_kit::{Item, Size, TextField, Toggle, context_menu};
@@ -30,7 +30,6 @@ const ROW_H: f32 = 72.0;
 const DOT_X: f32 = 16.0;
 const TEXT_X: f32 = 30.0;
 const PAD_R: f32 = 14.0;
-const TRASH_W: f32 = 30.0;
 
 /// The count chip after the sender, where a conversation has more than one
 /// message on it. An outline and a number: quiet enough to read past, there
@@ -38,6 +37,23 @@ const TRASH_W: f32 = 30.0;
 const CHIP_H: f32 = 15.0;
 const CHIP_PAD: f32 = 5.0;
 const CHIP_GAP: f32 = 6.0;
+
+/// How far a row has to be swiped left, as a share of its width, for letting
+/// go to put it in the trash. Short of it, the row slides back.
+const SWIPE: f32 = 0.5;
+
+/// A row let go short of the cut slides back into place; in seconds, quicker
+/// than the eye takes it in as a wait.
+const SLIDE_BACK: f32 = 0.1;
+
+/// A row thrown away by a swipe slides the rest of the way out, then closes
+/// up so the rows under it rise into its place; in seconds.
+const SLIDE_OUT: f32 = 0.18;
+const CLOSE_UP: f32 = 0.22;
+
+/// How long a thrown-away row stays hidden while the trash is asked, in
+/// seconds: a delete that fails shows the row again.
+const GONE_FOR: f64 = 10.0;
 
 /// How close to the end of the list the wheel has to get before the page after
 /// it is asked for. About two rows: near enough to be arriving, far enough that
@@ -54,6 +70,103 @@ enum Hit {
     Forward,
     /// Read, or unread: the whole conversation.
     Mark(bool),
+}
+
+/// A row being swiped left with two fingers: which one, how far, how wide it
+/// is, and when the fingers let go of it short of the cut, while it slides
+/// back.
+#[derive(Clone, Default)]
+struct Swipe {
+    row: String,
+    x: f32,
+    width: f32,
+    back: Option<f64>,
+}
+
+/// The touchpad's two-finger motion this frame, and whether the fingers left
+/// it: a touchpad's scroll ends with a motion of nothing. A mouse wheel is no
+/// swipe.
+fn fingers(ui: &Ui) -> (Vec2, bool) {
+    ui.input(|i| {
+        let mut motion = Vec2::ZERO;
+        let mut lifted = false;
+        for event in &i.events {
+            if let Event::MouseWheel { unit: MouseWheelUnit::Point, delta, .. } = event {
+                motion += *delta;
+                lifted |= *delta == Vec2::ZERO;
+            }
+        }
+        (motion, lifted)
+    })
+}
+
+/// Fast at first, easing to a stop: `p` from 0 to 1.
+fn ease(p: f32) -> f32 {
+    1.0 - (1.0 - p.clamp(0.0, 1.0)).powi(3)
+}
+
+impl Swipe {
+    /// The fingers' motion over the row `row` this frame.
+    fn track(&mut self, row: &str, dx: f32, dy: f32, width: f32, now: f64) {
+        // A scroll that wobbles sideways is not a swipe.
+        if dx == 0.0 || dx.abs() <= dy.abs() {
+            return;
+        }
+        if self.row != row {
+            *self = Swipe { row: row.to_string(), ..Swipe::default() };
+        }
+        // Caught again on its way back: from where it is drawn.
+        self.x = self.shift(row, now);
+        self.back = None;
+        // Natural scrolling, as the touchpad is set: fingers moving left move
+        // the content left.
+        self.x = (self.x + dx).clamp(-width, 0.0);
+        self.width = width;
+    }
+
+    /// The swipe once the fingers have left the touchpad, if it went past the
+    /// cut and throws its row away. Short of it, the row slides back. Until
+    /// they leave, nothing happens, however still they are.
+    fn ended(&mut self, lifted: bool, now: f64) -> Option<Swipe> {
+        if let Some(at) = self.back {
+            if now - at >= f64::from(SLIDE_BACK) {
+                *self = Swipe::default();
+            }
+            return None;
+        }
+        if !lifted || self.x == 0.0 {
+            return None;
+        }
+        if !self.far() {
+            self.back = Some(now);
+            return None;
+        }
+        Some(std::mem::take(self))
+    }
+
+    /// Past the cut: letting go throws the row away.
+    fn far(&self) -> bool {
+        self.x < -self.width * SWIPE
+    }
+
+    /// How far left the row `row` is drawn at `now`.
+    fn shift(&self, row: &str, now: f64) -> f32 {
+        if self.row != row {
+            return 0.0;
+        }
+        match self.back {
+            Some(at) => self.x * (1.0 - ease((now - at) as f32 / SLIDE_BACK)),
+            None => self.x,
+        }
+    }
+
+    /// The row this swipe threw away, `t` seconds after: how far left it is
+    /// and how tall. It slides out from where the fingers left it, then
+    /// closes up.
+    fn leaving(&self, t: f32) -> (f32, f32) {
+        let x = self.x + (-self.width - self.x) * ease(t / SLIDE_OUT);
+        (x, ROW_H * (1.0 - ease((t - SLIDE_OUT) / CLOSE_UP)))
+    }
 }
 
 /// The keys the row menu's lines are also on, as the keymap has them.
@@ -188,6 +301,13 @@ impl PostApp {
             );
             return;
         }
+        // A row thrown away by a swipe stays hidden until the trash has it.
+        let swipe_id = Id::new(("post-swipe", step));
+        let gone_id = Id::new(("post-gone", step));
+        let mut swipe: Swipe = ui.ctx().data_mut(|d| d.get_temp(swipe_id)).unwrap_or_default();
+        let mut gone: Vec<(Swipe, f64)> = ui.ctx().data_mut(|d| d.get_temp(gone_id)).unwrap_or_default();
+        let now = ui.input(|input| input.time);
+        gone.retain(|(thrown, at)| now - at < GONE_FOR && rows.iter().any(|row| row.id == thrown.row));
         // Each step of the history scrolls on its own: Back finds the list
         // where it was left, and it is the same list beside a message.
         let out = ScrollArea::vertical()
@@ -198,7 +318,11 @@ impl PostApp {
                         .as_deref()
                         .is_some_and(|id| row.id == id || row.ids.iter().any(|m| m == id));
                     let keyed = keyed_list && i == focus;
-                    if let Some(what) = message_row(ui, row, shown, keyed, keyed && follow, &keys) {
+                    let leaving = gone
+                        .iter()
+                        .find(|(thrown, _)| thrown.row == row.id)
+                        .map(|(thrown, at)| thrown.leaving((now - at) as f32));
+                    if let Some(what) = message_row(ui, row, shown, keyed, keyed && follow, &keys, &mut swipe, leaving) {
                         focused = Some(i);
                         hit = Some((what, row.clone()));
                     }
@@ -207,6 +331,24 @@ impl PostApp {
                     loading_row(ui);
                 }
             });
+        // The fingers leaving the touchpad throw the swiped row away, or let
+        // it slide back.
+        if let Some(thrown) = swipe.ended(fingers(ui).1, now) {
+            if let Some(row) = rows.iter().find(|row| row.id == thrown.row) {
+                hit = Some((Hit::Delete, row.clone()));
+            }
+            gone.push((thrown, now));
+        }
+        // Drawn every frame while a row is on its way out or back.
+        if swipe.back.is_some() || gone.iter().any(|(_, at)| now - at < f64::from(SLIDE_OUT + CLOSE_UP)) {
+            ui.ctx().request_repaint();
+        } else if !gone.is_empty() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+        }
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(swipe_id, swipe);
+            d.insert_temp(gone_id, gone);
+        });
         // The wheel arriving at the end of the list is the ask for the
         // page after it — and a list too short to fill the viewport asks
         // by itself, until the window is full or the mailbox is out.
@@ -227,7 +369,7 @@ impl PostApp {
                 self.open_row(account, &thread);
                 self.pane = Pane::Reader;
             }
-            // The line is the conversation, so the trash on it takes the
+            // The line is the conversation, so throwing it away takes the
             // conversation: every message behind that one line.
             Some((Hit::Delete, thread)) => {
                 for id in &thread.ids {
@@ -301,6 +443,11 @@ impl PostApp {
 /// `open` is the conversation in the reader: its row is filled. `focused` is
 /// the row the keyboard is on: an outline, so the arrows and Enter show where
 /// they are without the row looking open.
+///
+/// `swipe` follows two fingers moving left over the row: the row slides with
+/// them over the trash.
+/// `leaving` is a row already thrown away: how far out it is and how tall.
+#[allow(clippy::too_many_arguments)]
 fn message_row(
     ui: &mut eframe::egui::Ui,
     row: &Thread,
@@ -308,19 +455,42 @@ fn message_row(
     focused: bool,
     follow: bool,
     keys: &RowKeys,
+    swipe: &mut Swipe,
+    leaving: Option<(f32, f32)>,
 ) -> Option<Hit> {
-    let (rect, resp) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
-    if follow {
-        ui.scroll_to_rect(rect, None);
+    let height = leaving.map_or(ROW_H, |(_, h)| h);
+    if height <= 0.0 {
+        return None;
     }
-    let hovered = resp.hovered();
+    let sense = if leaving.is_some() { Sense::hover() } else { Sense::click() };
+    let (full, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), sense);
+    if follow && leaving.is_none() {
+        ui.scroll_to_rect(full, None);
+    }
+    if leaving.is_none() && resp.contains_pointer() {
+        let motion = fingers(ui).0;
+        swipe.track(&row.id, motion.x, motion.y, full.width(), ui.input(|i| i.time));
+    }
+    let x = leaving.map_or_else(|| swipe.shift(&row.id, ui.input(|i| i.time)), |(x, _)| x);
+    // A row closing up shows only what is left of it.
+    let clip = ui.clip_rect();
+    ui.set_clip_rect(full.intersect(clip));
+    if x < 0.0 {
+        let strip = Rect::from_min_max(Pos2::new(full.max.x + x, full.min.y), full.max)
+            .shrink2(Vec2::new(0.0, 1.0));
+        let fill = omarchy_kit::danger_fill(ui);
+        let painter = ui.painter().with_clip_rect(strip);
+        painter.rect_filled(strip, 0.0, fill);
+        icons::draw(
+            &painter,
+            Rect::from_center_size(strip.center(), Vec2::splat(17.0)),
+            "trash",
+            omarchy_kit::on(fill),
+        );
+    }
+    let rect = Rect::from_min_size(full.min + Vec2::new(x, 0.0), Vec2::new(full.width(), ROW_H));
+    let hovered = resp.hovered() && x == 0.0;
     let (first, second, third) = (rect.min.y + 19.0, rect.min.y + 37.0, rect.min.y + 55.0);
-    let trash = Rect::from_center_size(
-        Pos2::new(rect.max.x - PAD_R - TRASH_W / 2.0, (second + third) / 2.0),
-        Vec2::splat(TRASH_W),
-    );
-    let on_trash = resp.hover_pos().is_some_and(|at| trash.contains(at));
 
     // Open, under the pointer, where the keyboard is: the kit's marks, clear
     // of the line between rows.
@@ -333,8 +503,8 @@ fn message_row(
     .paint(ui, rect.shrink2(Vec2::new(0.0, 1.0)));
     let visuals = ui.visuals();
     ui.painter().hline(
-        rect.x_range(),
-        rect.max.y - 0.5,
+        full.x_range(),
+        full.max.y - 0.5,
         Stroke::new(1.0_f32, visuals.widgets.noninteractive.bg_stroke.color),
     );
     let fg = visuals.text_color();
@@ -371,9 +541,8 @@ fn message_row(
         count_chip(painter, Pos2::new(wrote + CHIP_GAP, first), row.count, weak);
     }
 
-    // The subject, and the start of the message under it. The trash is in
-    // their way only while the pointer is on the row.
-    let right = rect.max.x - PAD_R - if hovered { TRASH_W + 6.0 } else { 0.0 };
+    // The subject, and the start of the message under it.
+    let right = rect.max.x - PAD_R;
     elided(
         painter,
         Pos2::new(left, second),
@@ -396,21 +565,12 @@ fn message_row(
         false,
         right - left,
     );
-
-    if hovered {
-        icons::draw(
-            painter,
-            Rect::from_center_size(trash.center(), Vec2::splat(17.0)),
-            "trash",
-            if on_trash { accent } else { weak },
-        );
+    ui.set_clip_rect(clip);
+    if leaving.is_some() {
+        return None;
     }
 
-    let resp = resp.on_hover_text(if on_trash {
-        "Move this conversation to the trash"
-    } else {
-        "Open this conversation"
-    });
+    let resp = resp.on_hover_text("Open this conversation");
 
     // The right button: what every mail client offers on a line of its list.
     // A draft is only opened or thrown away.
@@ -448,7 +608,7 @@ fn message_row(
     if !resp.clicked() {
         return None;
     }
-    Some(if on_trash { Hit::Delete } else { Hit::Open })
+    Some(Hit::Open)
 }
 
 /// The line at the end of the list while the page after it is on the wire.
@@ -536,5 +696,67 @@ fn name_of(who: &str) -> &str {
         who.trim_start_matches('<').trim_end_matches('>').trim()
     } else {
         name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two fingers left past half the row throw it away when they leave the
+    /// touchpad, and not before, however still they are; short of it the row
+    /// slides back, and a scroll with a sideways wobble moves nothing.
+    #[test]
+    fn a_row_swiped_past_half_goes_to_the_trash_when_let_go() {
+        let mut swipe = Swipe::default();
+        swipe.track("a", -200.0, 0.0, 300.0, 1.0);
+        assert!(swipe.ended(false, 5.0).is_none(), "the fingers are still down");
+        assert_eq!(swipe.shift("a", 5.0), -200.0);
+        assert_eq!(swipe.ended(true, 5.0).map(|thrown| thrown.row).as_deref(), Some("a"));
+        assert_eq!(swipe.shift("a", 5.0), 0.0, "the swipe is over");
+
+        swipe.track("a", -140.0, 0.0, 300.0, 6.0);
+        assert!(swipe.ended(true, 6.0).is_none(), "short of the cut");
+        assert_eq!(swipe.shift("a", 6.0), -140.0, "it slides back from where it was let go");
+        assert!(swipe.ended(false, 6.5).is_none());
+        assert_eq!(swipe.shift("a", 6.5), 0.0, "and is back in place");
+
+        swipe.track("a", -20.0, 40.0, 300.0, 7.0);
+        assert_eq!(swipe.shift("a", 7.0), 0.0, "a scroll down is not a swipe");
+
+        swipe.track("a", -200.0, 0.0, 300.0, 8.0);
+        swipe.track("a", 100.0, 0.0, 300.0, 8.05);
+        assert!(swipe.ended(true, 8.1).is_none(), "swiped back before letting go");
+    }
+
+    /// The touchpad's motion is what it scrolled; its scroll of nothing is
+    /// the fingers leaving it. A mouse wheel is neither.
+    #[test]
+    fn a_touchpad_scroll_ends_with_a_motion_of_nothing() {
+        let wheel = |unit, delta| Event::MouseWheel { unit, delta, modifiers: Default::default() };
+        let ctx = eframe::egui::Context::default();
+        let mut seen = Vec::new();
+        let input = eframe::egui::RawInput {
+            events: vec![
+                wheel(MouseWheelUnit::Point, Vec2::new(-30.0, 2.0)),
+                wheel(MouseWheelUnit::Line, Vec2::new(-1.0, 0.0)),
+                wheel(MouseWheelUnit::Point, Vec2::ZERO),
+            ],
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            eframe::egui::CentralPanel::default().show(ctx, |ui| seen.push(fingers(ui)));
+        });
+        assert_eq!(seen, vec![(Vec2::new(-30.0, 2.0), true)]);
+    }
+
+    /// A thrown-away row slides out from where the fingers left it, then
+    /// closes up.
+    #[test]
+    fn a_thrown_row_slides_out_then_closes_up() {
+        let thrown = Swipe { row: "a".into(), x: -150.0, width: 300.0, back: None };
+        assert_eq!(thrown.leaving(0.0), (-150.0, ROW_H));
+        assert_eq!(thrown.leaving(SLIDE_OUT), (-300.0, ROW_H));
+        assert_eq!(thrown.leaving(SLIDE_OUT + CLOSE_UP).1, 0.0);
     }
 }
