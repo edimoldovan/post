@@ -39,6 +39,9 @@ const TILE: f32 = 512.0;
 const MAX_HTML: usize = 4 * 1024 * 1024;
 /// The most one picture may weigh.
 const MAX_PICTURE: u64 = 10 * 1024 * 1024;
+/// Where a message's relative addresses resolve: `//host/…` to https, as
+/// mail apps take it; a bare path to a host that is never there.
+const BASE: &str = "https://mail.invalid/";
 
 /// The body on screen, if one is: one message's document at a time.
 #[derive(Default)]
@@ -115,6 +118,7 @@ impl Open {
             page,
             DocumentConfig {
                 viewport: Some(viewport(width, ppp)),
+                base_url: Some(BASE.into()),
                 net_provider: Some(pictures),
                 navigation_provider: Some(Arc::new(Browser)),
                 ..Default::default()
@@ -816,5 +820,15 @@ mod tests {
         assert!(picture(b"RIFF\0\0\0\0WEBPVP8 "));
         assert!(!picture(b"body { color: red }"));
         assert!(!picture(b"wOF2\0\0"));
+    }
+
+    /// A message that links its stylesheet as `//host/…`, as Google's
+    /// security alerts do, opens.
+    #[test]
+    fn a_link_without_a_scheme_opens() {
+        let message = "<html><head><link href=\"//fonts.invalid/css?family=Sans\" rel=\"stylesheet\"></head>\
+            <body><img src=\"logo.png\"><p>A new sign-in</p></body></html>";
+        let open = Open::new(&Context::default(), "k", &page(message, LINK), 800.0, 1.0);
+        assert!(open.height() > 1.0);
     }
 }
