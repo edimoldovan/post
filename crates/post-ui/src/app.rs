@@ -42,6 +42,7 @@ impl eframe::App for PostApp {
         for (key, done) in self.jobs.drain() {
             self.answer(key, done);
         }
+        self.people.drain();
         while let Ok(picked) = self.picked_rx.try_recv() {
             match picked {
                 crate::state::Picked::Attach(files) => {

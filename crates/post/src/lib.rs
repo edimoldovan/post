@@ -25,6 +25,7 @@ pub mod gmail;
 pub mod mime;
 pub mod oauth;
 pub mod paths;
+pub mod people;
 pub mod reply;
 pub mod store;
 pub mod verbs;

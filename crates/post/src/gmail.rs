@@ -30,8 +30,9 @@ const API: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 const BATCH_API: &str = "https://gmail.googleapis.com/batch/gmail/v1";
 
 /// How many inner calls go in one batch. Gmail allows a hundred; a page is
-/// smaller than that, so this is only ever one call.
-const BATCH: usize = 50;
+/// smaller than that, so a listing is only ever one call. Gathering who an
+/// account writes to asks for its Sent mail this many at a time.
+pub(crate) const BATCH: usize = 50;
 
 /// The separator between the inner calls we send. Ours to choose, and it may
 /// not appear in anything it separates — nothing here contains it.
@@ -205,6 +206,60 @@ fn fetch_drafts(email: &str, page: Option<&str>) -> Result<Value, String> {
         "messages": rows,
         "next_page": index.get("nextPageToken").cloned().unwrap_or(Value::Null),
     }))
+}
+
+/// One page of the Sent folder's message ids, newest first — as many as
+/// Gmail gives in one — and the token of the page after it.
+pub fn sent_ids(email: &str, page: Option<&str>) -> Result<(Vec<String>, Option<String>), String> {
+    let mut url = format!("{API}/messages?maxResults=500&labelIds=SENT");
+    if let Some(token) = page {
+        url.push_str(&format!("&pageToken={}", oauth::urlencode(token)));
+    }
+    let index = request(email, "GET", &url, None)?;
+    let ids = index
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let next = index.get("nextPageToken").and_then(Value::as_str).map(str::to_owned);
+    Ok((ids, next))
+}
+
+/// Who each of these sent messages went to: its id, when it went in Gmail's
+/// milliseconds, and its To, Cc and Bcc as one list. One batch call, in
+/// whatever order Gmail answers; a message that did not come back whole is
+/// not there.
+pub fn sent_to(email: &str, ids: &[String]) -> Result<Vec<(String, i64, String)>, String> {
+    let paths: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            Ok(format!(
+                "/gmail/v1/users/me/messages/{}?format=metadata\
+                 &metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Bcc",
+                checked_id(id)?
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(batch_get(email, &paths)?
+        .into_iter()
+        .filter_map(|message| {
+            let id = message.get("id").and_then(Value::as_str)?.to_string();
+            let at = message.get("internalDate").and_then(|d| match d {
+                Value::String(s) => s.parse::<i64>().ok(),
+                other => other.as_i64(),
+            })?;
+            let payload = message.get("payload").unwrap_or(&Value::Null);
+            let to: Vec<String> = ["To", "Cc", "Bcc"]
+                .iter()
+                .filter_map(|name| mime::header(payload, name))
+                .collect();
+            Some((id, at, to.join(", ")))
+        })
+        .collect())
 }
 
 /// The system folders that hold mail, in the order Gmail shows them, with the

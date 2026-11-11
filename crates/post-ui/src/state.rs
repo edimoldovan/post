@@ -84,6 +84,8 @@ pub struct PostApp {
     pub open_rx: Option<Receiver<Route>>,
     /// A repaint handle, so an answer from a thread lands on screen at once.
     pub wake: Option<Context>,
+    /// Who each account has written to, for the address lines to offer.
+    pub people: crate::people::People,
 
     pub palette: Palette,
     /// Whether the user lets Claude use Post: `None` until asked.
@@ -234,6 +236,7 @@ impl PostApp {
             command_palette: omarchy_kit::CommandPalette::default(),
             open_rx: None,
             wake: None,
+            people: crate::people::People::default(),
             palette: omarchy_kit::theme::load(),
             claude: post::claude::choice(),
             theme_watcher: ThemeWatcher::new(),
@@ -530,6 +533,10 @@ impl PostApp {
                     .cloned()
                     .collect();
                 self.accounts = Some(list.into_iter().map(|(email, _)| email).collect());
+                // Who each one writes to is read from its Sent mail, quietly.
+                for account in self.accounts.clone().unwrap_or_default() {
+                    self.people.gather(&account, self.wake.clone());
+                }
             }
             Done::Renamed { account, name } => {
                 self.status.clear();
@@ -716,14 +723,19 @@ impl PostApp {
             }
             Done::Sent { to } => {
                 let on_top = key == Some(self.nav.key());
-                let (reply, sent) = match self.step_of(key) {
+                let (reply, sent, from) = match self.step_of(key) {
                     Some((route, screen)) => {
                         let sent = screen.draft_id.clone();
+                        let from = screen.from.clone().or_else(|| route.account().map(str::to_owned));
                         screen.written();
-                        (matches!(route, Route::Reply { .. }), sent)
+                        (matches!(route, Route::Reply { .. }), sent, from)
                     }
-                    None => (false, None),
+                    None => (false, None, None),
                 };
+                // Whoever it went to is offered from now on.
+                if let Some(from) = from {
+                    self.people.gather(&from, self.wake.clone());
+                }
                 // A draft that went is no longer in Drafts, and Sent has one
                 // more in it.
                 self.recount(key);

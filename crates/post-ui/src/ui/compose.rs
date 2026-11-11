@@ -27,9 +27,10 @@ use eframe::egui::{
     Align, CentralPanel, Color32, Context, FontSelection, Frame, Galley, Key, Layout, Modifiers,
     Popup, Response, RichText, ScrollArea, Stroke, TextBuffer, TextEdit, Ui, Vec2,
 };
-use omarchy_kit::{self as kit, Button, Size, TagField, TextField};
+use omarchy_kit::{self as kit, Button, Offer, Size, TagField, TextField};
 
 use crate::client::Job;
+use post::people::Person;
 use crate::commands::Command;
 use crate::route::Route;
 use crate::state::{PostApp, Screen};
@@ -48,13 +49,15 @@ impl PostApp {
         let fixed = matches!(route, Route::Reply { .. } | Route::Forward { .. });
         // Before the editor is built, so a focused text field cannot swallow
         // the only two keys that mean something here — unless the palette is
-        // open over it, and they are the palette's.
+        // open over it, and they are the palette's. Esc is an address line's
+        // while it lists who to put on, to close the list.
         if !self.command_palette.is_open() {
+            let listing = TagField::offering(ctx);
             ctx.input_mut(|input| {
                 if input.consume_key(Modifiers::COMMAND, Key::Enter) {
                     out.push(Command::Send);
                 }
-                if input.consume_key(Modifiers::NONE, Key::Escape) {
+                if !listing && input.consume_key(Modifiers::NONE, Key::Escape) {
                     out.push(Command::Back);
                 }
             });
@@ -154,12 +157,16 @@ impl PostApp {
                     });
                 }
             });
+            // Who the account in From has written to, offered as each line
+            // is typed in.
+            self.people.keep_up(&picked, self.wake.clone());
+            let people = self.people.of(&picked);
             let s = &mut self.screen;
             let [to_typing, cc_typing, bcc_typing] = &mut s.typing;
-            let to = address_line(ui, "To", &mut s.to, to_typing, "post-to");
+            let to = address_line(ui, "To", &mut s.to, to_typing, "post-to", people);
             if s.copies {
-                address_line(ui, "Cc", &mut s.cc, cc_typing, "post-cc");
-                address_line(ui, "Bcc", &mut s.bcc, bcc_typing, "post-bcc");
+                address_line(ui, "Cc", &mut s.cc, cc_typing, "post-cc", people);
+                address_line(ui, "Bcc", &mut s.bcc, bcc_typing, "post-bcc", people);
             }
             match (&route, &draft) {
                 (Route::Reply { .. }, Some(draft)) => field(ui, "Subject", &draft.subject),
@@ -349,13 +356,10 @@ pub fn links(text: &str) -> Vec<Range<usize>> {
     found
 }
 
-/// The chips in an address field, in order.
-pub fn chips(field: &str) -> Vec<&str> {
-    field
-        .split(',')
-        .map(str::trim)
-        .filter(|chip| !chip.is_empty())
-        .collect()
+/// The chips in an address field, in order: a comma in a quoted name is the
+/// name's.
+pub fn chips(field: &str) -> Vec<String> {
+    post::reply::recipients(field)
 }
 
 /// True for what a field takes as an address: `ale@acme.com`, or
@@ -380,7 +384,7 @@ pub fn is_address(text: &str) -> bool {
 /// leaving the field, Send. What is not one stays where it is, for the reader
 /// to put right.
 pub fn commit(field: &mut String, typing: &mut String) {
-    let mut tags: Vec<String> = chips(field).into_iter().map(str::to_owned).collect();
+    let mut tags = chips(field);
     if TagField::commit(&mut tags, typing, is_address) {
         *field = tags.join(", ");
     }
@@ -388,18 +392,28 @@ pub fn commit(field: &mut String, typing: &mut String) {
 
 /// One address line: its addresses as tags, then what is being typed, all
 /// in one field that starts where the lines above and below do. A space, a
-/// comma or a semicolon finishes an address. Returns the typing field, for
-/// the keyboard to start in.
-fn address_line(ui: &mut Ui, name: &str, field: &mut String, typing: &mut String, salt: &str) -> Response {
+/// comma or a semicolon finishes an address, and under the line are the
+/// `people` that go with what is typed. Returns the typing field, for the
+/// keyboard to start in.
+fn address_line(
+    ui: &mut Ui,
+    name: &str,
+    field: &mut String,
+    typing: &mut String,
+    salt: &str,
+    people: &[Person],
+) -> Response {
     ui.horizontal_top(|ui| {
         name_of(ui, name);
-        let before: Vec<String> = chips(field).into_iter().map(str::to_owned).collect();
+        let before = chips(field);
+        let offers = offers(people, &before, typing);
         let mut tags = before.clone();
         let line = ui.add(
             TagField::new(&mut tags, typing)
                 .accept(is_address)
                 .separators(" ,;")
                 .hint("name@example.com")
+                .offers(&offers)
                 .id_salt(salt),
         );
         if tags != before {
@@ -408,6 +422,30 @@ fn address_line(ui: &mut Ui, name: &str, field: &mut String, typing: &mut String
         line
     })
     .inner
+}
+
+/// What a line offers for what is typed in it: the people with a word of
+/// their name or their address starting with it, most written to first, and
+/// none already on the line. Each puts on their name and their address.
+fn offers(people: &[Person], on: &[String], typing: &str) -> Vec<Offer> {
+    const MOST: usize = 8;
+    if typing.trim().is_empty() {
+        return Vec::new();
+    }
+    let on: Vec<String> = on.iter().map(|chip| post::reply::address_of(chip).to_lowercase()).collect();
+    people
+        .iter()
+        .filter(|person| person.matches(typing) && !on.contains(&person.address.to_lowercase()))
+        .take(MOST)
+        .map(|person| {
+            let (text, detail) = if person.name.is_empty() {
+                (person.address.clone(), String::new())
+            } else {
+                (person.name.clone(), person.address.clone())
+            };
+            Offer { tag: person.chip(), text, detail }
+        })
+        .collect()
 }
 
 /// The files going with it, as cards: the name opens the file, its size is

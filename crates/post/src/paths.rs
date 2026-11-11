@@ -121,13 +121,27 @@ pub fn read_cache_file(email: &str, id: &str) -> PathBuf {
         .join(format!("{}.json", safe(id)))
 }
 
+/// Who each account has written to, one file per account. Rebuildable like
+/// the caches: the Sent folder stays the truth.
+pub fn people_dir() -> PathBuf {
+    state_dir().join("postpeople")
+}
+
+/// One account's people. An address is a filename here, so nothing in it may
+/// be a path.
+pub fn people_file(email: &str) -> PathBuf {
+    people_dir().join(format!("{}.json", safe(email)))
+}
+
 /// Everything kept on this computer for one account but its sign-in and its
-/// entry: its cached page, the messages read, the bodies fetched.
+/// entry: its cached page, the messages read, the bodies fetched, the people
+/// it has written to.
 pub fn kept_for(email: &str) -> Vec<PathBuf> {
     vec![
         list_cache_file(email),
         read_cache_dir().join(safe(email)),
         bodies_dir().join(safe(email)),
+        people_file(email),
     ]
 }
 

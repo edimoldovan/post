@@ -29,6 +29,7 @@ pub mod client;
 pub mod commands;
 pub mod keymap;
 pub mod layout;
+pub mod people;
 pub mod route;
 pub mod state;
 pub mod ui;

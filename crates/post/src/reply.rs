@@ -30,7 +30,9 @@ pub struct Draft {
     pub account: String,
     /// The message being answered.
     pub replying_to: String,
-    /// Bare addresses: a display name is the sender's, not ours to repeat.
+    /// Addresses, each with the name the reader gave it where they gave one
+    /// — `Ale <ale@acme.com>`. A reply-all's are bare: a display name there
+    /// is the sender's, not ours to repeat.
     pub to: Vec<String>,
     /// Everyone else on the message being answered.
     pub cc: Vec<String>,
@@ -100,13 +102,21 @@ pub fn recipient(from: &str, reply_to: Option<&str>) -> String {
 /// quotes or angle brackets is part of a name, not a separator. Empty entries
 /// are dropped — a trailing comma is a typo, not an address.
 pub fn addresses(header: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+    named(header).into_iter().map(|(_, address)| address).collect()
+}
+
+/// Each address in one header, as [`addresses`] finds them, with the name it
+/// is written under: `"Biolchi, Ale" <ale@acme.com>` is `Biolchi, Ale` and
+/// `ale@acme.com`. The name is empty where there is none, and where it is
+/// only the address again.
+pub fn named(header: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
     let mut part = String::new();
     let (mut quoted, mut angled) = (false, false);
-    let done = |part: &mut String, out: &mut Vec<String>| {
+    let done = |part: &mut String, out: &mut Vec<(String, String)>| {
         let address = address_of(part);
         if !address.is_empty() {
-            out.push(address);
+            out.push((name_of(part, &address), address));
         }
         part.clear();
     };
@@ -125,6 +135,58 @@ pub fn addresses(header: &str) -> Vec<String> {
     }
     done(&mut part, &mut out);
     out
+}
+
+/// The name before the address in one entry, out of its quotes.
+fn name_of(part: &str, address: &str) -> String {
+    let Some(open) = part.rfind('<').filter(|open| part.rfind('>').is_some_and(|close| close > open + 1)) else {
+        return String::new();
+    };
+    let name = part[..open].trim();
+    let name = match name.strip_prefix('"').and_then(|name| name.strip_suffix('"')) {
+        Some(inner) => inner.replace("\\\"", "\"").replace("\\\\", "\\"),
+        None => name.to_string(),
+    };
+    if name.trim_matches('\'').eq_ignore_ascii_case(address) {
+        return String::new();
+    }
+    name.trim().to_string()
+}
+
+/// The entries of a field the reader wrote — To, Cc, Bcc — each with the
+/// name they gave it, as [`mailbox`] writes it.
+pub fn recipients(field: &str) -> Vec<String> {
+    named(field).iter().map(|(name, address)| mailbox(name, address)).collect()
+}
+
+/// One address with its name, as a field shows it and a header carries it:
+/// `Ale <ale@acme.com>`, the name in quotes where it holds a comma, a full
+/// stop or another character a header reads something into. Without a name,
+/// the address.
+pub fn mailbox(name: &str, address: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return address.to_string();
+    }
+    if name.contains(|c: char| "()<>[]:;@\\,.\"".contains(c)) {
+        format!("\"{}\" <{address}>", name.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        format!("{name} <{address}>")
+    }
+}
+
+/// A field's entries as a header carries them: a name that is not ASCII in
+/// RFC 2047 base64, as a Swedish subject is, and the address as it stands.
+fn wire(entries: &[String]) -> String {
+    entries
+        .iter()
+        .map(|entry| match named(entry).pop() {
+            Some((name, address)) if !name.is_ascii() => format!("{} <{address}>", header_value(&name)),
+            Some((name, address)) => mailbox(&name, &address),
+            None => entry.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A list of addresses as one field: what the compose view shows, and what it
@@ -304,12 +366,12 @@ pub fn header_value(text: &str) -> String {
 /// lines of whatever length the writer felt like, and may say `.` on one of
 /// its own. Encoded, none of that is anyone's problem.
 pub fn raw_message(draft: &Draft) -> Result<String, String> {
-    let mut head = vec![format!("To: {}", address_line(&draft.to))];
+    let mut head = vec![format!("To: {}", wire(&draft.to))];
     if !draft.cc.is_empty() {
-        head.push(format!("Cc: {}", address_line(&draft.cc)));
+        head.push(format!("Cc: {}", wire(&draft.cc)));
     }
     if !draft.bcc.is_empty() {
-        head.push(format!("Bcc: {}", address_line(&draft.bcc)));
+        head.push(format!("Bcc: {}", wire(&draft.bcc)));
     }
     head.push(format!("Subject: {}", header_value(&draft.subject)));
     if !draft.in_reply_to.is_empty() {
@@ -445,9 +507,9 @@ pub fn draft_of_gmail(account: &str, draft_id: &str, message: &Value) -> Draft {
         id: draft_id.to_string(),
         account: account.to_string(),
         replying_to: String::new(),
-        to: addresses(&header("To")),
-        cc: addresses(&header("Cc")),
-        bcc: addresses(&header("Bcc")),
+        to: recipients(&header("To")),
+        cc: recipients(&header("Cc")),
+        bcc: recipients(&header("Bcc")),
         subject: header("Subject"),
         body: crate::mime::body(payload).text.unwrap_or_default(),
         in_reply_to: header("In-Reply-To"),
@@ -501,7 +563,7 @@ fn misaddressed(draft: &Draft) -> Option<String> {
         .iter()
         .chain(&draft.cc)
         .chain(&draft.bcc)
-        .find(|address| !address.contains('@'))
+        .find(|entry| !address_of(entry).contains('@'))
         .map(|address| format!("\"{address}\" is not an email address."))
 }
 
@@ -542,13 +604,13 @@ pub fn draft(
     let text = original_text(account, id);
     let mut draft = draft_of(account, id, body, &original, &text);
     if let Some(to) = to {
-        draft.to = addresses(to);
+        draft.to = recipients(to);
     }
     if let Some(cc) = cc {
-        draft.cc = addresses(cc);
+        draft.cc = recipients(cc);
     }
     if let Some(bcc) = bcc {
-        draft.bcc = addresses(bcc);
+        draft.bcc = recipients(bcc);
     }
     if let Some(fault) = misaddressed(&draft) {
         return Err(fault);
@@ -617,9 +679,9 @@ pub fn forward(
     let mut draft = Draft {
         id: draft_id.unwrap_or_default().trim().to_string(),
         account: account.to_string(),
-        to: addresses(to.unwrap_or_default()),
-        cc: addresses(cc.unwrap_or_default()),
-        bcc: addresses(bcc.unwrap_or_default()),
+        to: recipients(to.unwrap_or_default()),
+        cc: recipients(cc.unwrap_or_default()),
+        bcc: recipients(bcc.unwrap_or_default()),
         subject: subject.map_or_else(
             || fwd_subject(&crate::mime::header(payload, "Subject").unwrap_or_default()),
             str::to_string,
@@ -707,9 +769,9 @@ pub fn new_message(
     let mut draft = Draft {
         id: draft_id.unwrap_or_default().trim().to_string(),
         account: account.to_string(),
-        to: addresses(to),
-        cc: addresses(cc),
-        bcc: addresses(bcc),
+        to: recipients(to),
+        cc: recipients(cc),
+        bcc: recipients(bcc),
         subject: subject.to_string(),
         body: body.to_string(),
         attachments: attach.to_vec(),
@@ -799,6 +861,27 @@ mod tests {
                 ]
             }
         })
+    }
+
+    /// Names the reader gave stay with their addresses — in quotes where a
+    /// header needs them, and encoded on the wire where they are not ASCII —
+    /// and a name that is only the address again is no name.
+    #[test]
+    fn names_stay_with_their_addresses() {
+        let pair = |name: &str, address: &str| (name.to_string(), address.to_string());
+        assert_eq!(
+            named("Ale <ale@acme.com>, \"Biolchi, Ale\" <b@acme.com>, cm@ey.com, \"x@y.com\" <x@y.com>"),
+            vec![pair("Ale", "ale@acme.com"), pair("Biolchi, Ale", "b@acme.com"), pair("", "cm@ey.com"), pair("", "x@y.com")]
+        );
+        let field = "Ale <ale@acme.com>, \"Biolchi, Ale\" <b@acme.com>, Åsa Ström <asa@acme.se>, cm@ey.com";
+        let written = recipients(field);
+        assert_eq!(written, vec!["Ale <ale@acme.com>", "\"Biolchi, Ale\" <b@acme.com>", "Åsa Ström <asa@acme.se>", "cm@ey.com"]);
+        assert_eq!(recipients(&address_line(&written)), written, "a field written back reads the same");
+        assert_eq!(
+            wire(&written),
+            "Ale <ale@acme.com>, \"Biolchi, Ale\" <b@acme.com>, =?UTF-8?B?w4VzYSBTdHLDtm0=?= <asa@acme.se>, cm@ey.com"
+        );
+        assert_eq!(addresses(field), vec!["ale@acme.com", "b@acme.com", "asa@acme.se", "cm@ey.com"]);
     }
 
     #[test]
@@ -1079,7 +1162,7 @@ mod tests {
         });
         let draft = draft_of_gmail("ed@acme.com", "r-123", &message);
         assert_eq!(draft.id, "r-123");
-        assert_eq!(draft.to, vec!["ale@acme.com".to_string()]);
+        assert_eq!(draft.to, vec!["Ale <ale@acme.com>".to_string()], "the name stays with the address");
         assert_eq!(draft.cc, vec!["cm@ey.com".to_string()]);
         assert_eq!(draft.bcc, vec!["fredrik@norberg.se".to_string()]);
         assert_eq!(draft.subject, "Re: Offerten");
