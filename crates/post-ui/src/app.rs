@@ -126,6 +126,11 @@ impl PostApp {
 
     /// The commands the keyboard asked for this frame.
     fn collect_input(&mut self, ctx: &Context) -> Vec<Command> {
+        // While a menu is open the keys are its own, the palette's chord
+        // too: it walks on Up and Down and closes on Esc.
+        if omarchy_kit::menu_open(ctx) {
+            return Vec::new();
+        }
         let mut cmds = Vec::new();
         // The palette opens even while a text field has the keyboard — by
         // the chords that type nothing, so no binding can eat a letter.
@@ -1066,6 +1071,39 @@ mod tests {
         app.open("ed@acme.com", id);
         app.absorb(Done::Thread(conversation(id)));
         app
+    }
+
+    /// While a right-click menu is open the keys are its own: Esc closes the
+    /// menu and leaves the message open; the next Esc goes back.
+    #[test]
+    fn an_open_menu_keeps_the_keys() {
+        use eframe::egui::{CentralPanel, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Sense, Vec2};
+        let mut app = reading("m1");
+        let ctx = Context::default();
+        let at = Pos2::new(20.0, 20.0);
+        let mut frame = |events: Vec<Event>| {
+            let mut cmds = Vec::new();
+            let _ = ctx.run(RawInput { events, ..Default::default() }, |ctx| {
+                cmds.extend(app.collect_input(ctx));
+                CentralPanel::default().show(ctx, |ui| {
+                    let spot = ui.allocate_rect(Rect::from_center_size(at, Vec2::splat(20.0)), Sense::click());
+                    omarchy_kit::context_menu(&spot, |m| {
+                        let _ = m.item("Copy address").clicked();
+                    });
+                });
+            });
+            cmds
+        };
+        let escape = || vec![Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }];
+        frame(vec![]);
+        frame(vec![
+            Event::PointerMoved(at),
+            Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE },
+            Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE },
+        ]);
+        assert!(!frame(escape()).contains(&Command::Back), "Esc closes the menu");
+        frame(vec![]);
+        assert!(frame(escape()).contains(&Command::Back), "and the next one goes back");
     }
 
     /// A conversation open, and Reply pressed on it.
