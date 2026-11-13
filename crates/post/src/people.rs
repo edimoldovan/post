@@ -10,9 +10,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{gmail, paths, reply, store};
 
-/// A pause after each batch, so a first read of years of Sent mail stays well
-/// inside Gmail's rate for one account, beside whatever the window asks for.
-const PAUSE: Duration = Duration::from_millis(1500);
+/// How much of the account's allowance — 15,000 units a minute — gathering may
+/// spend. A third: the rest is for the window, the terminal and Claude, and
+/// for another computer reading the same account.
+const UNITS_PER_MINUTE: u32 = 5_000;
+
+/// The pause after each batch that keeps a first read of years of Sent mail
+/// at [`UNITS_PER_MINUTE`]: a batch is [`gmail::BATCH`] gets.
+const PAUSE: Duration =
+    Duration::from_millis(60_000 * (gmail::BATCH as u64) * (gmail::GET_UNITS as u64) / UNITS_PER_MINUTE as u64);
 
 /// Someone the account has written to.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

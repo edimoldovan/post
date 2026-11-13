@@ -11,6 +11,13 @@
 //! OAuth tokens are refreshed here, quietly: an access token near its expiry,
 //! or a 401 from an access token revoked early, is exchanged for a new one and
 //! the call is retried once. The account only ever has to be connected once.
+//!
+//! Gmail meters each account by the minute, and everything Post does for an
+//! account — the window, the terminal, Claude, gathering who it writes to —
+//! draws on that one allowance. A call Gmail turns away for the rate waits
+//! and goes again, a few times over a little more than a minute, rather than
+//! failing what the reader asked for; so does the part of a batch that was
+//! turned away, and only that part.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -33,6 +40,24 @@ const BATCH_API: &str = "https://gmail.googleapis.com/batch/gmail/v1";
 /// smaller than that, so a listing is only ever one call. Gathering who an
 /// account writes to asks for its Sent mail this many at a time.
 pub(crate) const BATCH: usize = 50;
+
+/// What one `messages.get` costs against the account's allowance, in Gmail's
+/// quota units. The allowance is 15,000 units a minute for one account.
+pub(crate) const GET_UNITS: u32 = 5;
+
+/// How long to wait before each try again of a call Gmail turned away for the
+/// rate, when it does not say. Together a little over a minute, so the last
+/// try lands in a minute the first one did not spend.
+const BACKOFF: [Duration; 5] = [
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+    Duration::from_secs(16),
+    Duration::from_secs(32),
+];
+
+/// The longest a `Retry-After` is taken at its word.
+const LONGEST_WAIT: Duration = Duration::from_secs(60);
 
 /// The separator between the inner calls we send. Ours to choose, and it may
 /// not appear in anything it separates — nothing here contains it.
@@ -384,7 +409,43 @@ fn batch(email: &str, ids: &[String]) -> Result<Vec<Value>, String> {
 }
 
 /// GETs as one batch call, the answers in whatever order Gmail gives them.
+///
+/// Gmail meters the calls inside a batch one by one, so a batch can come back
+/// partly answered and partly turned away for the rate. The turned-away ones
+/// are asked for again, on their own, after a wait; what still has no answer
+/// once the waits are spent is left out, as a message that did not come back
+/// always has been.
 fn batch_get(email: &str, paths: &[String]) -> Result<Vec<Value>, String> {
+    batch_get_with(email, paths, std::thread::sleep)
+}
+
+fn batch_get_with(
+    email: &str,
+    paths: &[String],
+    mut sleep: impl FnMut(Duration),
+) -> Result<Vec<Value>, String> {
+    let mut answered = Vec::new();
+    let mut asking: Vec<String> = paths.to_vec();
+    let mut waits = BACKOFF.iter();
+    while !asking.is_empty() {
+        let answers =
+            patiently(&mut sleep, || batch_once(email, &asking)).map_err(|e| e.message())?;
+        let busy = answers.iter().any(busy_part);
+        answered.extend(answers.into_iter().filter(|a| a.get("error").is_none()));
+        if !busy {
+            break;
+        }
+        let Some(wait) = waits.next() else {
+            break;
+        };
+        asking = unanswered(&asking, &answered);
+        sleep(*wait);
+    }
+    Ok(answered)
+}
+
+/// One batch call for these paths, with the token refreshed if it has to be.
+fn batch_once(email: &str, paths: &[String]) -> Result<Vec<Value>, Failure> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
@@ -399,14 +460,42 @@ fn batch_get(email: &str, paths: &[String]) -> Result<Vec<Value>, String> {
     }
     body.push_str(&format!("--{BOUNDARY}--\r\n"));
 
-    let access = access_token(email, false)?;
+    let access = access_token(email, false).map_err(Failure::Message)?;
     match send_batch(&access, &body) {
         Err(Failure::Unauthorized) => {
-            let access = access_token(email, true)?;
-            send_batch(&access, &body).map_err(|e| e.message())
+            let access = access_token(email, true).map_err(Failure::Message)?;
+            send_batch(&access, &body)
         }
-        other => other.map_err(|e| e.message()),
+        other => other,
     }
+}
+
+/// The paths that nothing answered yet: an answer is matched to its path by
+/// the id the path ends in — a message's or a label's, which is what every
+/// batch here asks for.
+fn unanswered(paths: &[String], answered: &[Value]) -> Vec<String> {
+    let ids: HashSet<&str> = answered
+        .iter()
+        .filter_map(|a| a.get("id").and_then(Value::as_str))
+        .collect();
+    paths
+        .iter()
+        .filter(|path| {
+            let id = path.split('?').next().unwrap_or(path).rsplit('/').next().unwrap_or("");
+            !ids.contains(id)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Whether one part of a batch answer is Gmail turning that call away for the
+/// rate, by the error object it holds instead of a message.
+fn busy_part(answer: &Value) -> bool {
+    let Some(error) = answer.get("error") else {
+        return false;
+    };
+    let code = error.get("code").and_then(Value::as_u64).unwrap_or(0);
+    busy(code as u16, answer)
 }
 
 /// One message's row in a listing, out of Gmail's JSON.
@@ -834,17 +923,88 @@ fn checked_label(label: &str) -> Result<&str, String> {
     Ok(label)
 }
 
-/// One call, with the access token refreshed if it has to be.
+/// One call, with the access token refreshed if it has to be, and tried again
+/// after a wait while Gmail turns it away for the rate.
 fn request(email: &str, method: &str, url: &str, body: Option<Value>) -> Result<Value, String> {
-    let access = access_token(email, false)?;
-    match send(&access, method, url, body.clone()) {
-        Err(Failure::Unauthorized) => {
-            // The access token was refused: get a new one and try once more. A
-            // second refusal is the account's problem, not the token's.
-            let access = access_token(email, true)?;
-            send(&access, method, url, body).map_err(|e| e.message())
+    patiently(std::thread::sleep, || {
+        let access = access_token(email, false).map_err(Failure::Message)?;
+        match send(&access, method, url, body.clone()) {
+            Err(Failure::Unauthorized) => {
+                // The access token was refused: get a new one and try once
+                // more. A second refusal is the account's problem, not the
+                // token's.
+                let access = access_token(email, true).map_err(Failure::Message)?;
+                send(&access, method, url, body.clone())
+            }
+            other => other,
         }
-        other => other.map_err(|e| e.message()),
+    })
+    .map_err(|e| e.message())
+}
+
+/// `call`, and again after each wait in [`BACKOFF`] — or as long as Gmail's
+/// `Retry-After` says — for as long as Gmail turns it away for the rate. Any
+/// other answer, good or bad, is the answer.
+fn patiently<T>(
+    mut sleep: impl FnMut(Duration),
+    mut call: impl FnMut() -> Result<T, Failure>,
+) -> Result<T, Failure> {
+    let mut waits = BACKOFF.iter();
+    loop {
+        match call() {
+            Err(Failure::Busy { message, after }) => {
+                let Some(wait) = waits.next() else {
+                    return Err(Failure::Busy { message, after });
+                };
+                sleep(after.map_or(*wait, |after| after.min(LONGEST_WAIT)));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Whether a refusal is Gmail metering the account rather than refusing the
+/// call: a 429, or a 403 that says it is about the rate or the quota. A 403
+/// for a disabled API or a missing scope is a refusal, and waiting will not
+/// change it.
+fn busy(code: u16, body: &Value) -> bool {
+    if code == 429 {
+        return true;
+    }
+    if code != 403 {
+        return false;
+    }
+    let error = body.get("error").unwrap_or(&Value::Null);
+    let reasons = ["/errors", "/details"]
+        .iter()
+        .filter_map(|at| error.pointer(at).and_then(Value::as_array))
+        .flatten()
+        .filter_map(|e| e.get("reason").and_then(Value::as_str));
+    let metered = |reason: &str| {
+        matches!(
+            reason,
+            "rateLimitExceeded" | "userRateLimitExceeded" | "quotaExceeded" | "RATE_LIMIT_EXCEEDED"
+        )
+    };
+    let message = error.get("message").and_then(Value::as_str).unwrap_or_default();
+    reasons.into_iter().any(metered)
+        || message.starts_with("Quota exceeded")
+        || message.contains("Rate Limit Exceeded")
+}
+
+/// A refused call as what it can go wrong as: metered, or simply refused.
+fn refusal(code: u16, response: ureq::Response) -> Failure {
+    let after = response
+        .header("Retry-After")
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(Duration::from_secs);
+    let text = response.into_string().unwrap_or_default();
+    let body = serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
+    let message = explain(code, &text);
+    if busy(code, &body) {
+        Failure::Busy { message, after }
+    } else {
+        Failure::Message(message)
     }
 }
 
@@ -888,10 +1048,13 @@ fn access_token(email: &str, force: bool) -> Result<String, String> {
     Ok(merged.access_token)
 }
 
-/// What a call can go wrong as. A 401 is its own case because it is the one
-/// worth retrying.
+/// What a call can go wrong as. A 401 is its own case because a fresh token
+/// fixes it; being metered is its own because a wait does.
+#[derive(Debug)]
 enum Failure {
     Unauthorized,
+    /// Turned away for the account's rate; `after` is Gmail's `Retry-After`.
+    Busy { message: String, after: Option<Duration> },
     Message(String),
 }
 
@@ -901,6 +1064,9 @@ impl Failure {
             Failure::Unauthorized => {
                 "Gmail refused the access token, twice — reconnect with: post add-account"
                     .to_string()
+            }
+            Failure::Busy { message, .. } => {
+                format!("{message} — Gmail is metering this account; try again in a minute")
             }
             Failure::Message(text) => text,
         }
@@ -938,10 +1104,7 @@ fn send(access: &str, method: &str, url: &str, body: Option<Value>) -> Result<Va
                 .map_err(|e| Failure::Message(format!("Gmail sent something unreadable: {e}")))
         }
         Err(ureq::Error::Status(401, _)) => Err(Failure::Unauthorized),
-        Err(ureq::Error::Status(code, response)) => {
-            let text = response.into_string().unwrap_or_default();
-            Err(Failure::Message(explain(code, &text)))
-        }
+        Err(ureq::Error::Status(code, response)) => Err(refusal(code, response)),
         Err(e) => Err(Failure::Message(format!("could not reach Gmail: {e}"))),
     }
 }
@@ -966,10 +1129,7 @@ fn send_batch(access: &str, body: &str) -> Result<Vec<Value>, Failure> {
             unbatch(&kind, &text)
         }
         Err(ureq::Error::Status(401, _)) => Err(Failure::Unauthorized),
-        Err(ureq::Error::Status(code, response)) => {
-            let text = response.into_string().unwrap_or_default();
-            Err(Failure::Message(explain(code, &text)))
-        }
+        Err(ureq::Error::Status(code, response)) => Err(refusal(code, response)),
         Err(e) => Err(Failure::Message(format!("could not reach Gmail: {e}"))),
     }
 }
@@ -1749,5 +1909,132 @@ mod tests {
         // Not JSON at all, and empty: still one sentence, never a panic.
         assert!(explain(500, "<html>oops</html>").contains("500"));
         assert!(explain(500, "").contains("500"));
+    }
+
+    // ------------------------------------------------------------ the rate
+
+    /// Being metered is a 429, or a 403 that says so — in its reasons or its
+    /// message, as the one Gmail sent the window does. A 403 for a disabled
+    /// API is a refusal, and so is any other code.
+    #[test]
+    fn a_quota_refusal_is_told_from_a_refusal() {
+        let quota = json!({"error": {"code": 403, "message":
+            "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute \
+             per user' of service 'gmail.googleapis.com' for consumer 'project_number:42'.",
+            "status": "PERMISSION_DENIED"}});
+        assert!(busy(403, &quota), "the message the window showed");
+        let reason = json!({"error": {"code": 403, "message": "User Rate Limit Exceeded",
+            "errors": [{"reason": "userRateLimitExceeded"}]}});
+        assert!(busy(403, &reason));
+        let detail = json!({"error": {"code": 403, "message": "Something",
+            "details": [{"reason": "RATE_LIMIT_EXCEEDED"}]}});
+        assert!(busy(403, &detail));
+        assert!(busy(429, &Value::Null), "a 429 needs no reason");
+
+        let disabled = json!({"error": {"code": 403, "message":
+            "Gmail API has not been used in project 42 before or it is disabled.",
+            "errors": [{"reason": "accessNotConfigured"}]}});
+        assert!(!busy(403, &disabled));
+        assert!(!busy(404, &quota), "only a 403 or a 429 is the rate");
+    }
+
+    /// A metered call is waited on and tried again, and its answer is the
+    /// answer; Gmail's `Retry-After` is the wait when it gives one.
+    #[test]
+    fn a_metered_call_waits_and_goes_again() {
+        let mut slept = Vec::new();
+        let mut tries = 0;
+        let answer = patiently(
+            |d| slept.push(d),
+            || {
+                tries += 1;
+                match tries {
+                    1 => Err(Failure::Busy { message: "metered".into(), after: None }),
+                    2 => Err(Failure::Busy {
+                        message: "metered".into(),
+                        after: Some(Duration::from_secs(7)),
+                    }),
+                    _ => Ok("the message"),
+                }
+            },
+        );
+        assert_eq!(answer.ok(), Some("the message"));
+        assert_eq!(slept, vec![BACKOFF[0], Duration::from_secs(7)]);
+    }
+
+    /// The waits are spent, together a little over a minute, and then the
+    /// refusal is the answer — said as being metered, not as forbidden.
+    #[test]
+    fn a_call_metered_past_every_wait_says_so() {
+        let mut slept = Vec::new();
+        let answer: Result<(), Failure> = patiently(
+            |d| slept.push(d),
+            || {
+                Err(Failure::Busy {
+                    message: "Gmail refused the call (429)".into(),
+                    after: Some(Duration::from_secs(3600)),
+                })
+            },
+        );
+        assert_eq!(slept.len(), BACKOFF.len());
+        assert!(slept.iter().all(|d| *d == LONGEST_WAIT), "an hour is not waited");
+        let said = answer.expect_err("still metered").message();
+        assert!(said.contains("429") && said.contains("try again in a minute"), "got {said}");
+        let total: Duration = BACKOFF.iter().sum();
+        assert!(total > Duration::from_secs(60), "the last try is in a fresh minute");
+    }
+
+    /// Anything other than being metered is not waited on.
+    #[test]
+    fn a_refusal_is_not_waited_on() {
+        let mut slept = Vec::new();
+        let mut tries = 0;
+        let answer: Result<(), Failure> = patiently(
+            |d| slept.push(d),
+            || {
+                tries += 1;
+                Err(Failure::Message("Gmail refused the call (404)".into()))
+            },
+        );
+        assert!(answer.is_err());
+        assert_eq!((tries, slept.len()), (1, 0));
+    }
+
+    /// A part of a batch turned away for the rate is told by the error it
+    /// holds; the paths still without an answer are the ones asked again.
+    #[test]
+    fn the_metered_part_of_a_batch_is_asked_for_again() {
+        let body = batch_answer(
+            "batch_abc",
+            &[
+                (200, r#"{"id":"18f3"}"#),
+                (429, r#"{"error":{"code":429,"message":"Too many concurrent requests for user"}}"#),
+                (200, r#"{"id":"18f1"}"#),
+                (
+                    403,
+                    r#"{"error":{"code":403,"message":"Quota exceeded for quota metric 'Total Query Cost'"}}"#,
+                ),
+            ],
+        );
+        let answers = match unbatch("multipart/mixed; boundary=batch_abc", &body) {
+            Ok(answers) => answers,
+            Err(e) => panic!("{}", e.message()),
+        };
+        assert_eq!(answers.iter().filter(|a| busy_part(a)).count(), 2);
+        let answered: Vec<Value> =
+            answers.into_iter().filter(|a| a.get("error").is_none()).collect();
+        let paths: Vec<String> = ["18f3", "18f2", "18f1", "18f0"]
+            .iter()
+            .map(|id| format!("/gmail/v1/users/me/messages/{id}?format=metadata&metadataHeaders=To"))
+            .collect();
+        let again = unanswered(&paths, &answered);
+        assert_eq!(again.len(), 2);
+        assert!(again[0].contains("/18f2?") && again[1].contains("/18f0?"), "got {again:?}");
+        // Labels end in their id too, with no query after it.
+        let labels = vec!["/gmail/v1/users/me/labels/INBOX".to_string()];
+        assert!(unanswered(&labels, &[json!({"id": "INBOX"})]).is_empty());
+        // A part that is simply missing is no reason to wait.
+        assert!(!busy_part(&json!({"error": {"code": 404, "message": "Not Found"}})));
+        assert!(!busy_part(&json!({"id": "18f3"})));
     }
 }
